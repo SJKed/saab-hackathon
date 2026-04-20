@@ -1,0 +1,470 @@
+import type { Base, Enemy, Resource } from "../models/entity";
+import type { NormalizedMapData } from "../data/loader";
+import type { ResourceAssignment } from "../engine/allocation";
+
+type EntityRenderData = {
+  bases: Base[];
+  enemies: Enemy[];
+  resources: Resource[];
+  assignments: ResourceAssignment[];
+  terrain: NormalizedMapData["terrain"];
+  hoverPoint: { x: number; y: number } | null;
+};
+
+const baseColor = "#ffd166";
+const enemyColor = "#ff6b6b";
+const resourceColor = "#4cc9f0";
+const labelColor = "#e0e0e0";
+const assignmentColor = "rgba(76, 201, 240, 0.7)";
+const hoverPointRadius = 18;
+
+type TooltipItem = {
+  icon: string;
+  title: string;
+  lines: string[];
+};
+
+function getLandFillColors(subtype: string | undefined): { top: string; bottom: string } {
+  if (subtype === "mainland") {
+    return { top: "#2a4a3a", bottom: "#1f3a2e" };
+  }
+
+  if (subtype === "island") {
+    return { top: "#37604a", bottom: "#2a4d3a" };
+  }
+
+  if (subtype === "peninsula") {
+    return { top: "#436d58", bottom: "#355f4a" };
+  }
+
+  return { top: "#2a4a3a", bottom: "#1f3a2e" };
+}
+
+function getShorelineColor(subtype: string | undefined): string {
+  if (subtype === "mainland") {
+    return "rgba(68, 112, 88, 0.85)";
+  }
+
+  if (subtype === "island") {
+    return "rgba(85, 132, 104, 0.85)";
+  }
+
+  if (subtype === "peninsula") {
+    return "rgba(97, 146, 120, 0.85)";
+  }
+
+  return "rgba(68, 112, 88, 0.85)";
+}
+
+function drawWaterGrid(ctx: CanvasRenderingContext2D): void {
+  const spacing = 54;
+  ctx.strokeStyle = "rgba(180, 215, 235, 0.06)";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x <= ctx.canvas.width; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, ctx.canvas.height);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= ctx.canvas.height; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(ctx.canvas.width, y);
+    ctx.stroke();
+  }
+}
+
+function drawFogOverlay(ctx: CanvasRenderingContext2D): void {
+  const centerX = ctx.canvas.width * 0.5;
+  const centerY = ctx.canvas.height * 0.5;
+  const outerRadius = Math.hypot(ctx.canvas.width, ctx.canvas.height) * 0.6;
+  const fog = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, outerRadius);
+  fog.addColorStop(0, "rgba(200, 220, 230, 0.04)");
+  fog.addColorStop(1, "rgba(0, 0, 0, 0.2)");
+
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+function isPointInsidePolygon(
+  point: { x: number; y: number },
+  polygon: { x: number; y: number }[],
+): boolean {
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+
+    const intersects =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 0.000001) + xi;
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
+  if (!data.hoverPoint) {
+    return [];
+  }
+
+  const items: TooltipItem[] = [];
+  const { x, y } = data.hoverPoint;
+
+  for (const base of data.bases) {
+    const distance = Math.hypot(base.position.x - x, base.position.y - y);
+    if (distance <= hoverPointRadius) {
+      items.push({
+        icon: "▣",
+        title: base.name ?? base.id,
+        lines: [
+          `Type: Friendly Base`,
+          `ID: ${base.id}`,
+          `Threat: ${base.threat.toFixed(4)}`,
+          `Priority Value: ${base.value.toFixed(1)}`,
+          `Position: (${Math.round(base.position.x)}, ${Math.round(base.position.y)})`,
+        ],
+      });
+    }
+  }
+
+  for (const resource of data.resources) {
+    const distance = Math.hypot(resource.position.x - x, resource.position.y - y);
+    if (distance <= hoverPointRadius) {
+      items.push({
+        icon: "●",
+        title: resource.name ?? resource.id,
+        lines: [
+          `Type: Resource (${resource.type})`,
+          `ID: ${resource.id}`,
+          `Speed: ${resource.speed.toFixed(1)}`,
+          `Range: ${resource.range.toFixed(1)}`,
+          `Status: ${resource.available ? "Available" : "Assigned"}`,
+          `Position: (${Math.round(resource.position.x)}, ${Math.round(resource.position.y)})`,
+        ],
+      });
+    }
+  }
+
+  for (const enemy of data.enemies) {
+    const distance = Math.hypot(enemy.position.x - x, enemy.position.y - y);
+    if (distance <= hoverPointRadius) {
+      items.push({
+        icon: "▲",
+        title: enemy.name ?? enemy.id,
+        lines: [
+          `Type: Enemy (${enemy.type})`,
+          `ID: ${enemy.id}`,
+          `Threat Level: ${enemy.threatLevel.toFixed(2)}`,
+          `Target: ${enemy.targetId ?? "Unassigned"}`,
+          `Position: (${Math.round(enemy.position.x)}, ${Math.round(enemy.position.y)})`,
+        ],
+      });
+    }
+  }
+
+  for (const zone of data.terrain.landZones) {
+    if (zone.points.length < 3) {
+      continue;
+    }
+
+    if (isPointInsidePolygon(data.hoverPoint, zone.points)) {
+      items.push({
+        icon: "⬒",
+        title: zone.name ?? zone.id ?? "Land Zone",
+        lines: [
+          `Type: Terrain (${zone.subtype ?? "unknown"})`,
+          `Side: ${zone.side ?? "n/a"}`,
+          `Vertices: ${zone.points.length}`,
+        ],
+      });
+    }
+  }
+
+  return items;
+}
+
+function drawTooltip(ctx: CanvasRenderingContext2D, data: EntityRenderData): void {
+  if (!data.hoverPoint) {
+    return;
+  }
+
+  const tooltipItems = collectTooltipItems(data);
+  if (tooltipItems.length === 0) {
+    return;
+  }
+
+  const padding = 10;
+  const lineHeight = 15;
+  const blockGap = 8;
+  const maxWidth = 360;
+  ctx.font = "12px Arial";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+
+  let contentHeight = 0;
+  for (let i = 0; i < tooltipItems.length; i += 1) {
+    const item = tooltipItems[i];
+    contentHeight += lineHeight + item.lines.length * lineHeight;
+    if (i < tooltipItems.length - 1) {
+      contentHeight += blockGap;
+    }
+  }
+
+  let boxX = data.hoverPoint.x + 16;
+  let boxY = data.hoverPoint.y + 16;
+  const boxWidth = maxWidth;
+  const boxHeight = contentHeight + padding * 2;
+
+  if (boxX + boxWidth > ctx.canvas.width - 8) {
+    boxX = data.hoverPoint.x - boxWidth - 16;
+  }
+  if (boxX < 8) {
+    boxX = 8;
+  }
+
+  if (boxY + boxHeight > ctx.canvas.height - 8) {
+    boxY = ctx.canvas.height - boxHeight - 8;
+  }
+  if (boxY < 8) {
+    boxY = 8;
+  }
+
+  ctx.fillStyle = "rgba(10, 20, 30, 0.92)";
+  ctx.strokeStyle = "rgba(224, 224, 224, 0.22)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+  ctx.fill();
+  ctx.stroke();
+
+  let cursorY = boxY + padding;
+  for (let i = 0; i < tooltipItems.length; i += 1) {
+    const item = tooltipItems[i];
+
+    ctx.fillStyle = "#f5f5f5";
+    ctx.font = "bold 12px Arial";
+    ctx.fillText(`${item.icon} ${item.title}`, boxX + padding, cursorY);
+    cursorY += lineHeight;
+
+    ctx.fillStyle = "#d0dbe0";
+    ctx.font = "12px Arial";
+    for (const line of item.lines) {
+      ctx.fillText(line, boxX + padding + 2, cursorY);
+      cursorY += lineHeight;
+    }
+
+    if (i < tooltipItems.length - 1) {
+      ctx.strokeStyle = "rgba(224, 224, 224, 0.15)";
+      ctx.beginPath();
+      ctx.moveTo(boxX + padding, cursorY + 2);
+      ctx.lineTo(boxX + boxWidth - padding, cursorY + 2);
+      ctx.stroke();
+      cursorY += blockGap;
+    }
+  }
+}
+
+export function drawTerrain(
+  ctx: CanvasRenderingContext2D,
+  map: Pick<NormalizedMapData, "terrain">,
+): void {
+  // Water background layer.
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.fillStyle = "#0a2a43";
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  drawWaterGrid(ctx);
+
+  // Subtle land shadow for depth.
+  ctx.shadowColor = "rgba(0,0,0,0.2)";
+  ctx.shadowBlur = 10;
+
+  for (const zone of map.terrain.landZones) {
+    if (zone.points.length < 3) {
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(zone.points[0].x, zone.points[0].y);
+
+    for (let i = 1; i < zone.points.length; i += 1) {
+      ctx.lineTo(zone.points[i].x, zone.points[i].y);
+    }
+
+    ctx.closePath();
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const point of zone.points) {
+      if (point.y < minY) {
+        minY = point.y;
+      }
+      if (point.y > maxY) {
+        maxY = point.y;
+      }
+    }
+
+    const fillColors = getLandFillColors(zone.subtype);
+    const gradient = ctx.createLinearGradient(0, minY, 0, maxY);
+    gradient.addColorStop(0, fillColors.top);
+    gradient.addColorStop(1, fillColors.bottom);
+
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    ctx.strokeStyle = getShorelineColor(zone.subtype);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Reset shadow so overlays/entities remain crisp.
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  drawFogOverlay(ctx);
+}
+
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  x: number,
+  y: number,
+): void {
+  ctx.font = "12px Arial";
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = "center";
+  ctx.fillText(label, x, y);
+}
+
+function drawBase(ctx: CanvasRenderingContext2D, base: Base): void {
+  const size = 14;
+  const x = base.position.x - size / 2;
+  const y = base.position.y - size / 2;
+
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(x, y, size, size);
+  drawLabel(ctx, base.name ?? base.id, base.position.x, base.position.y - 12);
+}
+
+function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy): void {
+  const width = 14;
+  const height = 16;
+  const x = enemy.position.x;
+  const y = enemy.position.y;
+
+  ctx.fillStyle = enemyColor;
+  ctx.beginPath();
+  ctx.moveTo(x, y - height / 2);
+  ctx.lineTo(x - width / 2, y + height / 2);
+  ctx.lineTo(x + width / 2, y + height / 2);
+  ctx.closePath();
+  ctx.fill();
+
+  drawLabel(ctx, enemy.name ?? enemy.id, x, y - 14);
+}
+
+function drawResource(ctx: CanvasRenderingContext2D, resource: Resource): void {
+  const radius = 7;
+  const x = resource.position.x;
+  const y = resource.position.y;
+
+  ctx.fillStyle = resourceColor;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawLabel(ctx, resource.name ?? resource.id, x, y - 12);
+}
+
+function drawThreatHeatmap(ctx: CanvasRenderingContext2D, bases: Base[]): void {
+  for (const base of bases) {
+    const intensity = Math.max(0, Math.min(1, base.threat * 110));
+    if (intensity <= 0) {
+      continue;
+    }
+
+    const radius = 90 + intensity * 70;
+    const gradient = ctx.createRadialGradient(
+      base.position.x,
+      base.position.y,
+      8,
+      base.position.x,
+      base.position.y,
+      radius,
+    );
+
+    gradient.addColorStop(0, `rgba(255, 0, 0, ${0.28 * intensity})`);
+    gradient.addColorStop(1, "rgba(255, 0, 0, 0)");
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(base.position.x, base.position.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawAssignments(
+  ctx: CanvasRenderingContext2D,
+  assignments: ResourceAssignment[],
+  resources: Resource[],
+  bases: Base[],
+): void {
+  ctx.strokeStyle = assignmentColor;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 5]);
+
+  for (const assignment of assignments) {
+    const resource = resources.find((item) => item.id === assignment.resourceId);
+    const base = bases.find((item) => item.id === assignment.baseId);
+
+    if (!resource || !base) {
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(resource.position.x, resource.position.y);
+    ctx.lineTo(base.position.x, base.position.y);
+    ctx.stroke();
+
+    const midpointX = (resource.position.x + base.position.x) * 0.5;
+    const midpointY = (resource.position.y + base.position.y) * 0.5;
+    const allocationLabel = `${assignment.resourceName} -> ${assignment.baseName}`;
+    ctx.font = "11px Arial";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(224, 224, 224, 0.9)";
+    ctx.fillText(allocationLabel, midpointX, midpointY - 6);
+  }
+
+  ctx.setLineDash([]);
+}
+
+export function renderEntities(ctx: CanvasRenderingContext2D, data: EntityRenderData): void {
+  drawThreatHeatmap(ctx, data.bases);
+  drawAssignments(ctx, data.assignments, data.resources, data.bases);
+
+  // Positions are already mapped into canvas space by the data loader.
+  for (const base of data.bases) {
+    drawBase(ctx, base);
+  }
+
+  for (const enemy of data.enemies) {
+    drawEnemy(ctx, enemy);
+  }
+
+  for (const resource of data.resources) {
+    drawResource(ctx, resource);
+  }
+
+  drawTooltip(ctx, data);
+}
