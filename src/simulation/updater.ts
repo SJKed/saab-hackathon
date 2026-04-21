@@ -120,17 +120,24 @@ export function createEnemyDeployments(
         x: enemyBase.position.x + Math.cos(offsetAngle) * offsetRadius,
         y: enemyBase.position.y + Math.sin(offsetAngle) * offsetRadius,
       };
+      const attack = plan.platform === "airplane" ? 58 : 36;
+      const defense = plan.platform === "airplane" ? 40 : 30;
+      const health = plan.platform === "airplane" ? 118 : 82;
 
       return {
         id: `${enemyBase.id}-${plan.platform}-${planIndex + 1}`,
         name: `${enemyBase.id} ${plan.label}`,
         position,
         velocity: { x: 0, y: 0 },
+        engagedWithId: undefined,
         type: plan.type,
         platform: plan.platform,
         threatLevel: plan.threatLevel,
         originBaseId: enemyBase.id,
         targetId: targetCity.id,
+        attack,
+        defense,
+        health,
       };
     }),
   );
@@ -146,6 +153,13 @@ export function updateEnemyPositions(
   }
 
   return enemies.map((enemy) => {
+    if (enemy.engagedWithId) {
+      return {
+        ...enemy,
+        velocity: { x: 0, y: 0 },
+      };
+    }
+
     const targetCity = getTargetCity(enemy, cities);
     if (!targetCity) {
       return enemy;
@@ -197,6 +211,14 @@ export function updateResourcePositions(
   }
 
   return resources.map((resource) => {
+    if (resource.engagedWithId) {
+      return {
+        ...resource,
+        available: false,
+        velocity: { x: 0, y: 0 },
+      };
+    }
+
     const assignment = assignments.find((item) => item.resourceId === resource.id);
     if (!assignment) {
       return {

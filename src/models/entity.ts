@@ -7,7 +7,13 @@ export interface Vector {
   y: number;
 }
 
-export interface AlliedCity {
+export interface CombatStats {
+  attack: number;
+  defense: number;
+  health: number;
+}
+
+export interface AlliedCity extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
@@ -15,23 +21,24 @@ export interface AlliedCity {
   threat: number;
 }
 
-export interface AlliedSpawnZone {
+export interface AlliedSpawnZone extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
 }
 
-export interface EnemyBase {
+export interface EnemyBase extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
 }
 
-export interface Enemy {
+export interface Enemy extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
   velocity: Vector;
+  engagedWithId?: string;
   type: EnemyType;
   platform: EnemyPlatform;
   threatLevel: number;
@@ -39,12 +46,13 @@ export interface Enemy {
   targetId?: string;
 }
 
-export interface Resource {
+export interface Resource extends CombatStats {
   id: string;
   name?: string;
   type: ResourceType;
   position: Vector;
   velocity: Vector;
+  engagedWithId?: string;
   speed: number;
   range: number;
   cooldown: number;
@@ -67,12 +75,18 @@ export const mockAlliedCities: AlliedCity[] = [
     position: { x: 260, y: 560 },
     value: 10,
     threat: 0.45,
+    attack: 42,
+    defense: 56,
+    health: 260,
   },
   {
     id: "B2",
     position: { x: 560, y: 520 },
     value: 8,
     threat: 0.3,
+    attack: 42,
+    defense: 56,
+    health: 260,
   },
 ];
 
@@ -86,6 +100,10 @@ export const mockEnemies: Enemy[] = [
     threatLevel: 0.9,
     originBaseId: "EB1",
     targetId: "B1",
+    engagedWithId: undefined,
+    attack: 58,
+    defense: 40,
+    health: 118,
   },
   {
     id: "E2",
@@ -96,6 +114,10 @@ export const mockEnemies: Enemy[] = [
     threatLevel: 0.7,
     originBaseId: "EB2",
     targetId: "B2",
+    engagedWithId: undefined,
+    attack: 36,
+    defense: 30,
+    health: 82,
   },
 ];
 
@@ -110,6 +132,10 @@ export const mockResources: Resource[] = [
     cooldown: 0,
     available: true,
     originSpawnZoneId: "AS1",
+    engagedWithId: undefined,
+    attack: 38,
+    defense: 28,
+    health: 78,
   },
   {
     id: "R2",
@@ -121,6 +147,10 @@ export const mockResources: Resource[] = [
     cooldown: 3,
     available: true,
     originSpawnZoneId: "AS2",
+    engagedWithId: undefined,
+    attack: 52,
+    defense: 46,
+    health: 125,
   },
   {
     id: "R3",
@@ -132,5 +162,9 @@ export const mockResources: Resource[] = [
     cooldown: 6,
     available: false,
     originSpawnZoneId: "AS3",
+    engagedWithId: undefined,
+    attack: 44,
+    defense: 40,
+    health: 112,
   },
 ];

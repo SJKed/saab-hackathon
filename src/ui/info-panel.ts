@@ -1,7 +1,8 @@
 import type { ResourceAssignment } from "../engine/allocation";
+import type { CombatLogEvent } from "../engine/combat";
 
 type InfoPanelApi = {
-  update: (assignments: ResourceAssignment[]) => void;
+  update: (assignments: ResourceAssignment[], events: CombatLogEvent[]) => void;
 };
 
 export function createInfoPanel(container: HTMLElement): InfoPanelApi {
@@ -34,6 +35,18 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
   content.style.flexDirection = "column";
   content.style.gap = "8px";
   panel.appendChild(content);
+
+  const eventLogTitle = document.createElement("strong");
+  eventLogTitle.textContent = "Event Log";
+  eventLogTitle.style.color = "#f5f5f5";
+  eventLogTitle.style.fontSize = "13px";
+  panel.appendChild(eventLogTitle);
+
+  const eventContent = document.createElement("div");
+  eventContent.style.display = "flex";
+  eventContent.style.flexDirection = "column";
+  eventContent.style.gap = "6px";
+  panel.appendChild(eventContent);
 
   container.appendChild(panel);
 
@@ -89,8 +102,9 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     title.releasePointerCapture(event.pointerId);
   });
 
-  const render = (assignments: ResourceAssignment[]): void => {
+  const render = (assignments: ResourceAssignment[], events: CombatLogEvent[]): void => {
     content.innerHTML = "";
+    eventContent.innerHTML = "";
 
     if (assignments.length === 0) {
       const empty = document.createElement("div");
@@ -140,9 +154,41 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
 
       content.appendChild(item);
     }
+
+    if (events.length === 0) {
+      const emptyEvents = document.createElement("div");
+      emptyEvents.textContent = "No combat events yet.";
+      emptyEvents.style.color = "#b8c7cc";
+      emptyEvents.style.fontSize = "12px";
+      eventContent.appendChild(emptyEvents);
+      return;
+    }
+
+    for (const event of events.slice(0, 12)) {
+      const eventItem = document.createElement("div");
+      eventItem.style.padding = "7px";
+      eventItem.style.border = "1px solid rgba(255, 255, 255, 0.08)";
+      eventItem.style.borderRadius = "5px";
+      eventItem.style.background = "rgba(16, 36, 42, 0.45)";
+
+      const tickLabel = document.createElement("div");
+      tickLabel.textContent = `Tick ${event.tick}`;
+      tickLabel.style.color = "#9ac7d1";
+      tickLabel.style.fontSize = "11px";
+      tickLabel.style.marginBottom = "2px";
+      eventItem.appendChild(tickLabel);
+
+      const eventText = document.createElement("div");
+      eventText.textContent = event.message;
+      eventText.style.color = "#e5eef2";
+      eventText.style.fontSize = "12px";
+      eventItem.appendChild(eventText);
+
+      eventContent.appendChild(eventItem);
+    }
   };
 
-  render([]);
+  render([], []);
 
   return {
     update: render,
