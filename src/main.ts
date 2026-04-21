@@ -1,8 +1,12 @@
 import { loadMapData } from "./data/loader";
 import { allocateResources } from "./engine/allocation";
 import type { ResourceAssignment } from "./engine/allocation";
-import { calculateThreatsForBases } from "./engine/threat";
-import { createEnemyDeployments, updateEnemyPositions } from "./simulation/updater";
+import { calculateThreatsForCities } from "./engine/threat";
+import {
+  createEnemyDeployments,
+  updateEnemyPositions,
+  updateResourcePositions,
+} from "./simulation/updater";
 import type { StrategyMode } from "./ui/controls";
 import { createControls } from "./ui/controls";
 import { createInfoPanel } from "./ui/info-panel";
@@ -36,7 +40,14 @@ let mapData = loadMapData({
   width: window.innerWidth,
   height: window.innerHeight,
 });
-let bases = mapData.bases.map((base) => ({ ...base, position: { ...base.position } }));
+let alliedCities = mapData.alliedCities.map((city) => ({
+  ...city,
+  position: { ...city.position },
+}));
+let alliedSpawnZones = mapData.alliedSpawnZones.map((spawnZone) => ({
+  ...spawnZone,
+  position: { ...spawnZone.position },
+}));
 let enemyBases = mapData.enemyBases.map((enemyBase) => ({
   ...enemyBase,
   position: { ...enemyBase.position },
@@ -44,8 +55,9 @@ let enemyBases = mapData.enemyBases.map((enemyBase) => ({
 let resources = mapData.resources.map((resource) => ({
   ...resource,
   position: { ...resource.position },
+  velocity: { ...resource.velocity },
 }));
-let enemies = createEnemyDeployments(enemyBases, bases);
+let enemies = createEnemyDeployments(enemyBases, alliedCities);
 let assignments: ResourceAssignment[] = [];
 let hoverPoint: { x: number; y: number } | null = null;
 let lastFrameTimestamp = performance.now();
@@ -68,7 +80,14 @@ function resetSimulationState(width: number, height: number): void {
   canvas.width = width;
   canvas.height = height;
   mapData = loadMapData({ width, height });
-  bases = mapData.bases.map((base) => ({ ...base, position: { ...base.position } }));
+  alliedCities = mapData.alliedCities.map((city) => ({
+    ...city,
+    position: { ...city.position },
+  }));
+  alliedSpawnZones = mapData.alliedSpawnZones.map((spawnZone) => ({
+    ...spawnZone,
+    position: { ...spawnZone.position },
+  }));
   enemyBases = mapData.enemyBases.map((enemyBase) => ({
     ...enemyBase,
     position: { ...enemyBase.position },
@@ -76,8 +95,9 @@ function resetSimulationState(width: number, height: number): void {
   resources = mapData.resources.map((resource) => ({
     ...resource,
     position: { ...resource.position },
+    velocity: { ...resource.velocity },
   }));
-  enemies = createEnemyDeployments(enemyBases, bases);
+  enemies = createEnemyDeployments(enemyBases, alliedCities);
   assignments = [];
   tickAccumulatorMs = 0;
 }
@@ -127,26 +147,33 @@ function renderLoop(timestamp: number): void {
     const strategySpeedFactor = getStrategySpeedFactor(controlsState.strategy);
     enemies = updateEnemyPositions(
       enemies,
-      bases,
+      alliedCities,
       (simulationTickMs / 1000) * strategySpeedFactor,
     );
-    bases = calculateThreatsForBases(bases, enemies);
+    alliedCities = calculateThreatsForCities(alliedCities, enemies);
 
     const resourcesForAllocation = resources.map((resource) => ({
       ...resource,
       available: resource.cooldown <= 0,
     }));
 
-    const allocationResult = allocateResources(bases, resourcesForAllocation);
-    resources = allocationResult.resources;
+    const allocationResult = allocateResources(alliedCities, resourcesForAllocation, enemies);
     assignments = allocationResult.assignments;
+    resources = updateResourcePositions(
+      allocationResult.resources,
+      assignments,
+      alliedCities,
+      enemies,
+      (simulationTickMs / 1000) * strategySpeedFactor,
+    );
     tickAccumulatorMs -= simulationTickMs;
   }
 
   drawTerrain(ctx, mapData);
   drawGrid();
   renderEntities(ctx, {
-    bases,
+    alliedCities,
+    alliedSpawnZones,
     enemyBases,
     enemies,
     resources,

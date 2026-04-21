@@ -1,5 +1,12 @@
 import mapJson from "../../assets/map.json";
-import type { Base, EnemyBase, Resource, ResourceType, Vector } from "../models/entity";
+import type {
+  AlliedCity,
+  AlliedSpawnZone,
+  EnemyBase,
+  Resource,
+  ResourceType,
+  Vector,
+} from "../models/entity";
 
 type RawPoint = {
   id: string;
@@ -8,12 +15,13 @@ type RawPoint = {
   y: number;
 };
 
-type RawBase = RawPoint & {
+type RawAlliedCity = RawPoint & {
   value: number;
 };
 
-type RawResource = RawPoint & {
+type ResourcePlan = {
   type: ResourceType;
+  label: string;
 };
 
 type RawTerrainZone = {
@@ -34,14 +42,15 @@ type RawMapData = {
     width: number;
     height: number;
   };
-  bases: RawBase[];
-  resources: RawResource[];
+  alliedCities: RawAlliedCity[];
+  alliedSpawnZones: RawPoint[];
   enemySpawnZones: RawPoint[];
   terrain: RawTerrain;
 };
 
 export type NormalizedMapData = {
-  bases: Base[];
+  alliedCities: AlliedCity[];
+  alliedSpawnZones: AlliedSpawnZone[];
   resources: Resource[];
   enemyBases: EnemyBase[];
   terrain: NormalizedTerrain;
@@ -64,6 +73,12 @@ type CanvasSize = {
   width: number;
   height: number;
 };
+
+const resourcePlans: ResourcePlan[] = [
+  { type: "air-defense", label: "Air Defense" },
+  { type: "drone", label: "Drone Wing" },
+  { type: "robot", label: "Ground Robot Unit" },
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -89,24 +104,12 @@ function isRawPoint(value: unknown): value is RawPoint {
   );
 }
 
-function isRawBase(value: unknown): value is RawBase {
+function isRawAlliedCity(value: unknown): value is RawAlliedCity {
   if (!isRawPoint(value)) {
     return false;
   }
 
   return isFiniteNumber((value as Record<string, unknown>).value);
-}
-
-function isResourceType(value: unknown): value is ResourceType {
-  return value === "drone" || value === "air-defense" || value === "robot";
-}
-
-function isRawResource(value: unknown): value is RawResource {
-  if (!isRawPoint(value)) {
-    return false;
-  }
-
-  return isResourceType((value as Record<string, unknown>).type);
 }
 
 function isRawTerrainPoint(value: unknown): value is [number, number] {
@@ -164,7 +167,7 @@ export function validateMapData(value: unknown): value is RawMapData {
     return false;
   }
 
-  const { meta, bases, resources, enemySpawnZones, terrain } = value;
+  const { meta, alliedCities, alliedSpawnZones, enemySpawnZones, terrain } = value;
 
   if (!isRecord(meta)) {
     return false;
@@ -178,11 +181,11 @@ export function validateMapData(value: unknown): value is RawMapData {
     return false;
   }
 
-  if (!Array.isArray(bases) || !bases.every(isRawBase)) {
+  if (!Array.isArray(alliedCities) || !alliedCities.every(isRawAlliedCity)) {
     return false;
   }
 
-  if (!Array.isArray(resources) || !resources.every(isRawResource)) {
+  if (!Array.isArray(alliedSpawnZones) || !alliedSpawnZones.every(isRawPoint)) {
     return false;
   }
 
@@ -216,32 +219,57 @@ export function normalizeVector(
   };
 }
 
-function normalizeBase(base: RawBase, sourceSize: CanvasSize, canvasSize: CanvasSize): Base {
+function normalizeAlliedCity(
+  city: RawAlliedCity,
+  sourceSize: CanvasSize,
+  canvasSize: CanvasSize,
+): AlliedCity {
   return {
-    id: base.id,
-    name: base.name,
-    position: normalizeVector(base, sourceSize, canvasSize),
-    value: base.value,
+    id: city.id,
+    name: city.name,
+    position: normalizeVector(city, sourceSize, canvasSize),
+    value: city.value,
     threat: 0,
   };
 }
 
-function normalizeResource(
-  resource: RawResource,
+function normalizeAlliedSpawnZone(
+  spawnZone: RawPoint,
   sourceSize: CanvasSize,
   canvasSize: CanvasSize,
+): AlliedSpawnZone {
+  return {
+    id: spawnZone.id,
+    name: spawnZone.name,
+    position: normalizeVector(spawnZone, sourceSize, canvasSize),
+  };
+}
+
+function getResourceSpeed(type: ResourceType): number {
+  return type === "drone" ? 3 : type === "air-defense" ? 2 : 1.5;
+}
+
+function getResourceRange(type: ResourceType): number {
+  return type === "air-defense" ? 220 : type === "drone" ? 150 : 120;
+}
+
+function createResourceFromSpawnZone(
+  spawnZone: AlliedSpawnZone,
+  index: number,
 ): Resource {
-  const position = normalizeVector(resource, sourceSize, canvasSize);
+  const plan = resourcePlans[index % resourcePlans.length];
 
   return {
-    id: resource.id,
-    name: resource.name,
-    type: resource.type,
-    position,
-    speed: resource.type === "drone" ? 3 : resource.type === "air-defense" ? 2 : 1.5,
-    range: resource.type === "air-defense" ? 220 : resource.type === "drone" ? 150 : 120,
+    id: `R${index + 1}`,
+    name: `${spawnZone.name ?? spawnZone.id} ${plan.label}`,
+    type: plan.type,
+    position: { ...spawnZone.position },
+    velocity: { x: 0, y: 0 },
+    speed: getResourceSpeed(plan.type),
+    range: getResourceRange(plan.type),
     cooldown: 0,
     available: true,
+    originSpawnZoneId: spawnZone.id,
   };
 }
 
@@ -285,10 +313,15 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
   };
 
   return {
-    bases: validatedMap.bases.map((base) => normalizeBase(base, sourceSize, canvasSize)),
-    resources: validatedMap.resources.map((resource) =>
-      normalizeResource(resource, sourceSize, canvasSize),
+    alliedCities: validatedMap.alliedCities.map((city) =>
+      normalizeAlliedCity(city, sourceSize, canvasSize),
     ),
+    alliedSpawnZones: validatedMap.alliedSpawnZones.map((spawnZone) =>
+      normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize),
+    ),
+    resources: validatedMap.alliedSpawnZones
+      .map((spawnZone) => normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize))
+      .map(createResourceFromSpawnZone),
     enemyBases: validatedMap.enemySpawnZones.map((spawn) =>
       normalizeSpawnZone(spawn, sourceSize, canvasSize),
     ),

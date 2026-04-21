@@ -1,8 +1,12 @@
-import type { Base, Resource } from "../models/entity";
+import type { AlliedCity, Enemy, Resource } from "../models/entity";
+import { predictIntercept } from "./intercept";
+
+export type ResourceMission = "intercept" | "reinforce";
 
 export type ResourceAssignment = {
-  baseId: string;
-  baseName: string;
+  mission: ResourceMission;
+  targetId: string;
+  targetName: string;
   resourceId: string;
   resourceName: string;
   distance: number;
@@ -27,13 +31,92 @@ function isResourceAvailable(resource: Resource): boolean {
   return resource.available && resource.cooldown <= 0;
 }
 
-export function allocateResources(bases: Base[], resources: Resource[]): AllocationResult {
-  const sortedBases = [...bases].sort((a, b) => b.threat - a.threat);
+function canIntercept(resource: Resource): boolean {
+  return resource.type === "air-defense" || resource.type === "drone";
+}
+
+function getCityById(cities: AlliedCity[], cityId: string | undefined): AlliedCity | undefined {
+  if (!cityId) {
+    return undefined;
+  }
+
+  return cities.find((city) => city.id === cityId);
+}
+
+function getInterceptPriority(enemy: Enemy, cities: AlliedCity[]): number {
+  const targetCity = getCityById(cities, enemy.targetId);
+  const targetValue = targetCity?.value ?? 5;
+  return enemy.threatLevel * targetValue;
+}
+
+function getReinforcementPriority(city: AlliedCity): number {
+  return city.value * (1 + city.threat * 100);
+}
+
+export function allocateResources(
+  cities: AlliedCity[],
+  resources: Resource[],
+  enemies: Enemy[],
+): AllocationResult {
   const mutableResources = resources.map((resource) => ({ ...resource }));
   const assignments: ResourceAssignment[] = [];
+  const sortedEnemies = [...enemies].sort(
+    (a, b) => getInterceptPriority(b, cities) - getInterceptPriority(a, cities),
+  );
 
-  for (const base of sortedBases) {
-    const priorityScore = base.value * base.threat;
+  for (const enemy of sortedEnemies) {
+    const priorityScore = getInterceptPriority(enemy, cities);
+    let bestResourceIndex = -1;
+    let bestInterceptDistance = Number.POSITIVE_INFINITY;
+    let bestInterceptTime = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < mutableResources.length; i += 1) {
+      const resource = mutableResources[i];
+      if (!isResourceAvailable(resource) || !canIntercept(resource)) {
+        continue;
+      }
+
+      const intercept = predictIntercept(resource, enemy, cities);
+      if (!intercept?.feasibleBeforeImpact) {
+        continue;
+      }
+
+      if (intercept.timeToIntercept < bestInterceptTime) {
+        bestInterceptTime = intercept.timeToIntercept;
+        bestInterceptDistance = intercept.distance;
+        bestResourceIndex = i;
+      }
+    }
+
+    if (bestResourceIndex < 0) {
+      continue;
+    }
+
+    const selectedResource = mutableResources[bestResourceIndex];
+    mutableResources[bestResourceIndex] = {
+      ...selectedResource,
+      available: false,
+    };
+
+    assignments.push({
+      mission: "intercept",
+      targetId: enemy.id,
+      targetName: enemy.name ?? enemy.id,
+      resourceId: selectedResource.id,
+      resourceName: selectedResource.name ?? selectedResource.id,
+      distance: bestInterceptDistance,
+      threatScore: enemy.threatLevel,
+      priorityScore,
+      reason: "Predicted intercept trajectory reaches the enemy resource before it can reach an allied city.",
+    });
+  }
+
+  const sortedCities = [...cities].sort(
+    (a, b) => getReinforcementPriority(b) - getReinforcementPriority(a),
+  );
+
+  for (const city of sortedCities) {
+    const priorityScore = getReinforcementPriority(city);
     let bestResourceIndex = -1;
     let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -43,7 +126,7 @@ export function allocateResources(bases: Base[], resources: Resource[]): Allocat
         continue;
       }
 
-      const distance = distanceBetween(resource.position, base.position);
+      const distance = distanceBetween(resource.position, city.position);
       if (distance < bestDistance) {
         bestDistance = distance;
         bestResourceIndex = i;
@@ -61,14 +144,15 @@ export function allocateResources(bases: Base[], resources: Resource[]): Allocat
     };
 
     assignments.push({
-      baseId: base.id,
-      baseName: base.name ?? base.id,
+      mission: "reinforce",
+      targetId: city.id,
+      targetName: city.name ?? city.id,
       resourceId: selectedResource.id,
       resourceName: selectedResource.name ?? selectedResource.id,
       distance: bestDistance,
-      threatScore: base.threat,
+      threatScore: city.threat,
       priorityScore,
-      reason: "Closest available resource assigned to the highest-threat base.",
+      reason: "Remaining available resource deployed to reinforce a high-priority allied city.",
     });
   }
 

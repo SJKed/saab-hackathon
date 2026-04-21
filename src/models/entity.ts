@@ -7,12 +7,18 @@ export interface Vector {
   y: number;
 }
 
-export interface Base {
+export interface AlliedCity {
   id: string;
   name?: string;
   position: Vector;
   value: number;
   threat: number;
+}
+
+export interface AlliedSpawnZone {
+  id: string;
+  name?: string;
+  position: Vector;
 }
 
 export interface EnemyBase {
@@ -38,20 +44,24 @@ export interface Resource {
   name?: string;
   type: ResourceType;
   position: Vector;
+  velocity: Vector;
   speed: number;
   range: number;
   cooldown: number;
   available: boolean;
+  originSpawnZoneId?: string;
 }
 
 // Type aliases are useful when importing a "model" naming style elsewhere.
 export type VectorModel = Vector;
-export type BaseModel = Base;
+export type BaseModel = AlliedCity;
+export type AlliedCityModel = AlliedCity;
+export type AlliedSpawnZoneModel = AlliedSpawnZone;
 export type EnemyBaseModel = EnemyBase;
 export type EnemyModel = Enemy;
 export type ResourceModel = Resource;
 
-export const mockBases: Base[] = [
+export const mockAlliedCities: AlliedCity[] = [
   {
     id: "B1",
     position: { x: 260, y: 560 },
@@ -94,27 +104,33 @@ export const mockResources: Resource[] = [
     id: "R1",
     type: "drone",
     position: { x: 300, y: 600 },
+    velocity: { x: 0, y: 0 },
     speed: 2.8,
     range: 160,
     cooldown: 0,
     available: true,
+    originSpawnZoneId: "AS1",
   },
   {
     id: "R2",
     type: "air-defense",
     position: { x: 520, y: 610 },
+    velocity: { x: 0, y: 0 },
     speed: 1.4,
     range: 220,
     cooldown: 3,
     available: true,
+    originSpawnZoneId: "AS2",
   },
   {
     id: "R3",
     type: "robot",
     position: { x: 180, y: 620 },
+    velocity: { x: 0, y: 0 },
     speed: 1.1,
     range: 120,
     cooldown: 6,
     available: false,
+    originSpawnZoneId: "AS3",
   },
 ];

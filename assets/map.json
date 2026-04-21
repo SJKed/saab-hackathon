@@ -3,15 +3,15 @@
     "width": 1666.7,
     "height": 1300
   },
-  "bases": [
-    { "id": "B1", "x": 1398.3, "y": 1071.7, "value": 10, "name": "Firewatch Station" },
-    { "id": "B2", "x": 321.7, "y": 1238.3, "value": 9, "name": "Southern Redoubt" },
-    { "id": "B3", "x": 918.3, "y": 835, "value": 8, "name": "Spear Point Base" }
+  "alliedCities": [
+    { "id": "C1", "x": 1225, "y": 1208.3, "value": 10, "name": "Meridia (Capital Y)" },
+    { "id": "C2", "x": 576.7, "y": 1236.7, "value": 8, "name": "Solano" },
+    { "id": "C3", "x": 96.7, "y": 1150, "value": 7, "name": "Callhaven" }
   ],
-  "resources": [
-    { "id": "R1", "type": "air-defense", "x": 1225, "y": 1208.3, "name": "Meridia (Capital Y)" },
-    { "id": "R2", "type": "drone", "x": 96.7, "y": 1150, "name": "Callhaven" },
-    { "id": "R3", "type": "drone", "x": 576.7, "y": 1236.7, "name": "Solano" }
+  "alliedSpawnZones": [
+    { "id": "AS1", "x": 1398.3, "y": 1071.7, "name": "Firewatch Station" },
+    { "id": "AS2", "x": 321.7, "y": 1238.3, "name": "Southern Redoubt" },
+    { "id": "AS3", "x": 918.3, "y": 835, "name": "Spear Point Base" }
   ],
   "enemySpawnZones": [
     { "id": "E1", "x": 198.3, "y": 335, "name": "Northern Vanguard Base" },
