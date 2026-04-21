@@ -215,6 +215,10 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
+    if (enemy.engagedWithId) {
+      continue;
+    }
+
     const targetCity = findClosestCity(enemy, alliedCities);
     if (!targetCity) {
       continue;
