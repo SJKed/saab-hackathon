@@ -119,7 +119,7 @@ Output:
 - Callhaven, Solano, and Meridia are now classified as allied cities and not resources.
 - Allied resources are deployed from allied spawn zones (bases) and can intercept enemy resources or reinforce allied cities.
 
-🧩 Prompt 13 - Combat calculations and Event log
+🧩 Prompt 14 - Combat calculations and Event log
 - All bases and resources should have a attack stat, defense stat and health stat.
 - When a resource engages a base or enemy resource, both entities should perform a damage calculation against eachother. Where inflicted damage is equal to (((attackers attack stat * (attackers attack stat / defenders defense stat)) / 50) + 2)
 - If an entities health drops to 0 or below, it is removed from the game.
