@@ -42,9 +42,7 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
 
 function getEnemyTimeToCity(enemy: Enemy, cities: AlliedCity[]): number {
   const targetCity = getTargetCity(enemy, cities);
-  const enemySpeed = Math.hypot(enemy.velocity.x, enemy.velocity.y);
-
-  if (!targetCity || enemySpeed <= epsilon) {
+  if (!targetCity) {
     return Number.POSITIVE_INFINITY;
   }
 
@@ -52,6 +50,15 @@ function getEnemyTimeToCity(enemy: Enemy, cities: AlliedCity[]): number {
     0,
     distanceBetween(enemy.position, targetCity.position) - minimumCityImpactDistance,
   );
+
+  if (remainingDistance <= 0) {
+    return 0;
+  }
+
+  const enemySpeed = Math.hypot(enemy.velocity.x, enemy.velocity.y);
+  if (enemySpeed <= epsilon) {
+    return Number.POSITIVE_INFINITY;
+  }
 
   return remainingDistance / enemySpeed;
 }
