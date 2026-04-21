@@ -230,6 +230,9 @@ function normalizeAlliedCity(
     position: normalizeVector(city, sourceSize, canvasSize),
     value: city.value,
     threat: 0,
+    attack: 42,
+    defense: 56,
+    health: 260,
   };
 }
 
@@ -242,6 +245,9 @@ function normalizeAlliedSpawnZone(
     id: spawnZone.id,
     name: spawnZone.name,
     position: normalizeVector(spawnZone, sourceSize, canvasSize),
+    attack: 34,
+    defense: 48,
+    health: 210,
   };
 }
 
@@ -258,6 +264,12 @@ function createResourceFromSpawnZone(
   index: number,
 ): Resource {
   const plan = resourcePlans[index % resourcePlans.length];
+  const attack =
+    plan.type === "air-defense" ? 52 : plan.type === "drone" ? 38 : 44;
+  const defense =
+    plan.type === "air-defense" ? 46 : plan.type === "drone" ? 28 : 40;
+  const health =
+    plan.type === "air-defense" ? 125 : plan.type === "drone" ? 78 : 112;
 
   return {
     id: `R${index + 1}`,
@@ -270,6 +282,9 @@ function createResourceFromSpawnZone(
     cooldown: 0,
     available: true,
     originSpawnZoneId: spawnZone.id,
+    attack,
+    defense,
+    health,
   };
 }
 
@@ -282,6 +297,9 @@ function normalizeSpawnZone(
     id: spawn.id,
     name: spawn.name,
     position: normalizeVector(spawn, sourceSize, canvasSize),
+    attack: 39,
+    defense: 52,
+    health: 240,
   };
 }
 

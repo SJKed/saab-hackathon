@@ -153,6 +153,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `ID: ${city.id}`,
           `Threat: ${city.threat.toFixed(4)}`,
           `Priority Value: ${city.value.toFixed(1)}`,
+          `ATK/DEF/HP: ${city.attack}/${city.defense}/${city.health.toFixed(1)}`,
           `Position: (${Math.round(city.position.x)}, ${Math.round(city.position.y)})`,
         ],
       });
@@ -173,6 +174,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Type: Allied Spawn Zone`,
           `ID: ${spawnZone.id}`,
           `Deployed Resources: ${deployedCount}`,
+          `ATK/DEF/HP: ${spawnZone.attack}/${spawnZone.defense}/${spawnZone.health.toFixed(1)}`,
           `Position: (${Math.round(spawnZone.position.x)}, ${Math.round(spawnZone.position.y)})`,
         ],
       });
@@ -198,6 +200,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Origin: ${resource.originSpawnZoneId ?? "Unknown"}`,
           `Speed: ${resource.speed.toFixed(1)}`,
           `Range: ${resource.range.toFixed(1)}`,
+          `ATK/DEF/HP: ${resource.attack}/${resource.defense}/${resource.health.toFixed(1)}`,
           `Status: ${missionStatus}`,
           `Position: (${Math.round(resource.position.x)}, ${Math.round(resource.position.y)})`,
         ],
@@ -219,6 +222,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Type: Enemy Base`,
           `ID: ${enemyBase.id}`,
           `Deployed Resources: ${deployedCount}`,
+          `ATK/DEF/HP: ${enemyBase.attack}/${enemyBase.defense}/${enemyBase.health.toFixed(1)}`,
           `Position: (${Math.round(enemyBase.position.x)}, ${Math.round(enemyBase.position.y)})`,
         ],
       });
@@ -237,6 +241,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Origin: ${enemy.originBaseId ?? "Unknown"}`,
           `Threat Level: ${enemy.threatLevel.toFixed(2)}`,
           `Target: ${enemy.targetId ?? "Unassigned"}`,
+          `ATK/DEF/HP: ${enemy.attack}/${enemy.defense}/${enemy.health.toFixed(1)}`,
           `Position: (${Math.round(enemy.position.x)}, ${Math.round(enemy.position.y)})`,
         ],
       });
