@@ -113,7 +113,7 @@ Implement:
 - Update rendering to reflect this change (e.g., different icons or colors)
 - map.json "bases" data should act as the "alliedSpawnZones" for resources.
 - Allied resources should be deployed from allied spawn zones (bases) and either intercept enemy resources or reinforce allied cities.
-- Allied resources should determine trajetory to enemy resource as to intercept them before they reach allied cities.
+- Allied resources should determine trajectory to enemy resource as to intercept them before they reach allied cities.
 
 Output:
 - Callhaven, Solano, and Meridia are now classified as allied cities and not resources.
