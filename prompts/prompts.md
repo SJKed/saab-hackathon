@@ -95,3 +95,11 @@ Display:
 
 Output:
 - Enemy bases now deploy resources (airplane and drone icons) instead of moving towards allied bases.
+
+🧩 Prompt 12 — The game should start of paused
+Implement:
+- Game starts in paused state
+- User must click "Start" to begin simulation
+- This behaviour should be consistent when pressing restart as well
+
+Output:- Game starts paused, user clicks "Start" to begin.

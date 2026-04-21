@@ -28,7 +28,7 @@ function createControlRow(label: string): HTMLDivElement {
 
 export function createControls(container: HTMLElement): ControlsApi {
   const state: ControlsState = {
-    isRunning: true,
+    isRunning: false,
     strategy: "balanced",
     speedMultiplier: 1,
   };
@@ -56,7 +56,7 @@ export function createControls(container: HTMLElement): ControlsApi {
   panel.appendChild(title);
 
   const startPauseButton = document.createElement("button");
-  startPauseButton.textContent = "Pause";
+  startPauseButton.textContent = "Start";
   startPauseButton.style.padding = "8px 10px";
   startPauseButton.style.background = "#1f3a2e";
   startPauseButton.style.color = "#f5f5f5";
@@ -79,8 +79,8 @@ export function createControls(container: HTMLElement): ControlsApi {
   restartButton.style.cursor = "pointer";
   restartButton.addEventListener("click", () => {
     restartRequested = true;
-    state.isRunning = true;
-    startPauseButton.textContent = "Pause";
+    state.isRunning = false;
+    startPauseButton.textContent = "Start";
   });
   panel.appendChild(restartButton);
 
