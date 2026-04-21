@@ -1,6 +1,28 @@
-import type { Base, Enemy } from "../models/entity";
+import type { Base, Enemy, EnemyBase, EnemyPlatform, EnemyType } from "../models/entity";
 
 const minimumDistanceToTarget = 6;
+
+type DeploymentPlan = {
+  platform: EnemyPlatform;
+  type: EnemyType;
+  threatLevel: number;
+  label: string;
+};
+
+const deploymentPlans: DeploymentPlan[] = [
+  {
+    platform: "airplane",
+    type: "attacker",
+    threatLevel: 0.85,
+    label: "Aircraft",
+  },
+  {
+    platform: "drone",
+    type: "recon",
+    threatLevel: 0.45,
+    label: "Drone",
+  },
+];
 
 function distanceSquared(a: { x: number; y: number }, b: { x: number; y: number }): number {
   const dx = b.x - a.x;
@@ -9,6 +31,14 @@ function distanceSquared(a: { x: number; y: number }, b: { x: number; y: number 
 }
 
 function getEnemySpeed(enemy: Enemy): number {
+  if (enemy.platform === "airplane") {
+    return 125;
+  }
+
+  if (enemy.platform === "drone") {
+    return 82;
+  }
+
   switch (enemy.type) {
     case "attacker":
       return 70;
@@ -41,6 +71,37 @@ function getTargetBase(enemy: Enemy, bases: Base[]): Base | undefined {
   }
 
   return nearestBase;
+}
+
+export function createEnemyDeployments(enemyBases: EnemyBase[], bases: Base[]): Enemy[] {
+  if (enemyBases.length === 0 || bases.length === 0) {
+    return [];
+  }
+
+  return enemyBases.flatMap((enemyBase, enemyBaseIndex) =>
+    deploymentPlans.map((plan, planIndex) => {
+      const targetBase = bases[(enemyBaseIndex + planIndex) % bases.length];
+      const offsetAngle =
+        (Math.PI * 2 * planIndex) / deploymentPlans.length + enemyBaseIndex * 0.55;
+      const offsetRadius = 18;
+      const position = {
+        x: enemyBase.position.x + Math.cos(offsetAngle) * offsetRadius,
+        y: enemyBase.position.y + Math.sin(offsetAngle) * offsetRadius,
+      };
+
+      return {
+        id: `${enemyBase.id}-${plan.platform}-${planIndex + 1}`,
+        name: `${enemyBase.id} ${plan.label}`,
+        position,
+        velocity: { x: 0, y: 0 },
+        type: plan.type,
+        platform: plan.platform,
+        threatLevel: plan.threatLevel,
+        originBaseId: enemyBase.id,
+        targetId: targetBase.id,
+      };
+    }),
+  );
 }
 
 export function updateEnemyPositions(enemies: Enemy[], bases: Base[], deltaSeconds: number): Enemy[] {

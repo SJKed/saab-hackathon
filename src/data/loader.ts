@@ -1,5 +1,5 @@
 import mapJson from "../../assets/map.json";
-import type { Base, Enemy, Resource, ResourceType, Vector } from "../models/entity";
+import type { Base, EnemyBase, Resource, ResourceType, Vector } from "../models/entity";
 
 type RawPoint = {
   id: string;
@@ -43,7 +43,7 @@ type RawMapData = {
 export type NormalizedMapData = {
   bases: Base[];
   resources: Resource[];
-  enemySpawnZones: Enemy[];
+  enemyBases: EnemyBase[];
   terrain: NormalizedTerrain;
 };
 
@@ -249,14 +249,11 @@ function normalizeSpawnZone(
   spawn: RawPoint,
   sourceSize: CanvasSize,
   canvasSize: CanvasSize,
-): Enemy {
+): EnemyBase {
   return {
     id: spawn.id,
     name: spawn.name,
     position: normalizeVector(spawn, sourceSize, canvasSize),
-    velocity: { x: 0, y: 1 },
-    type: "attacker",
-    threatLevel: 0.5,
   };
 }
 
@@ -292,7 +289,7 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
     resources: validatedMap.resources.map((resource) =>
       normalizeResource(resource, sourceSize, canvasSize),
     ),
-    enemySpawnZones: validatedMap.enemySpawnZones.map((spawn) =>
+    enemyBases: validatedMap.enemySpawnZones.map((spawn) =>
       normalizeSpawnZone(spawn, sourceSize, canvasSize),
     ),
     terrain: {
@@ -305,4 +302,3 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
     },
   };
 }
-

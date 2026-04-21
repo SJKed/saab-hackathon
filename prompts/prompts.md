@@ -87,3 +87,11 @@ Display:
 
 Output:
 - info panel
+
+🧩 Prompt 11 — Fix issue where enemy sends their entire base icon instead of resources.
+Display:
+- Enemy bases deploying resources instead of the bases moving towards allied bases.
+- Use supplied airplane.png and drone.png icons for deployed enemy resources.
+
+Output:
+- Enemy bases now deploy resources (airplane and drone icons) instead of moving towards allied bases.

@@ -1,9 +1,10 @@
-import type { Base, Enemy, Resource } from "../models/entity";
+import type { Base, Enemy, EnemyBase, Resource } from "../models/entity";
 import type { NormalizedMapData } from "../data/loader";
 import type { ResourceAssignment } from "../engine/allocation";
 
 type EntityRenderData = {
   bases: Base[];
+  enemyBases: EnemyBase[];
   enemies: Enemy[];
   resources: Resource[];
   assignments: ResourceAssignment[];
@@ -13,16 +14,26 @@ type EntityRenderData = {
 
 const baseColor = "#ffd166";
 const enemyColor = "#ff6b6b";
+const enemyBaseColor = "#d1495b";
 const resourceColor = "#4cc9f0";
 const labelColor = "#e0e0e0";
 const assignmentColor = "rgba(76, 201, 240, 0.7)";
+const enemyDeploymentLineColor = "rgba(255, 107, 107, 0.45)";
 const hoverPointRadius = 18;
+const airplaneIcon = createIcon(new URL("../../assets/airplane.png", import.meta.url).href);
+const droneIcon = createIcon(new URL("../../assets/drone.png", import.meta.url).href);
 
 type TooltipItem = {
   icon: string;
   title: string;
   lines: string[];
 };
+
+function createIcon(src: string): HTMLImageElement {
+  const image = new Image();
+  image.src = src;
+  return image;
+}
 
 function getLandFillColors(subtype: string | undefined): { top: string; bottom: string } {
   if (subtype === "mainland") {
@@ -155,15 +166,36 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
     }
   }
 
+  for (const enemyBase of data.enemyBases) {
+    const distance = Math.hypot(enemyBase.position.x - x, enemyBase.position.y - y);
+    if (distance <= hoverPointRadius) {
+      const deployedCount = data.enemies.filter(
+        (enemy) => enemy.originBaseId === enemyBase.id,
+      ).length;
+
+      items.push({
+        icon: "◆",
+        title: enemyBase.name ?? enemyBase.id,
+        lines: [
+          `Type: Enemy Base`,
+          `ID: ${enemyBase.id}`,
+          `Deployed Resources: ${deployedCount}`,
+          `Position: (${Math.round(enemyBase.position.x)}, ${Math.round(enemyBase.position.y)})`,
+        ],
+      });
+    }
+  }
+
   for (const enemy of data.enemies) {
     const distance = Math.hypot(enemy.position.x - x, enemy.position.y - y);
     if (distance <= hoverPointRadius) {
       items.push({
-        icon: "▲",
+        icon: enemy.platform === "airplane" ? "✈" : "◉",
         title: enemy.name ?? enemy.id,
         lines: [
-          `Type: Enemy (${enemy.type})`,
+          `Type: Enemy Resource (${enemy.platform})`,
           `ID: ${enemy.id}`,
+          `Origin: ${enemy.originBaseId ?? "Unknown"}`,
           `Threat Level: ${enemy.threatLevel.toFixed(2)}`,
           `Target: ${enemy.targetId ?? "Unassigned"}`,
           `Position: (${Math.round(enemy.position.x)}, ${Math.round(enemy.position.y)})`,
@@ -357,19 +389,91 @@ function drawBase(ctx: CanvasRenderingContext2D, base: Base): void {
   drawLabel(ctx, base.name ?? base.id, base.position.x, base.position.y - 12);
 }
 
+function drawEnemyBase(ctx: CanvasRenderingContext2D, enemyBase: EnemyBase): void {
+  const size = 18;
+  const x = enemyBase.position.x;
+  const y = enemyBase.position.y;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = enemyBaseColor;
+  ctx.strokeStyle = "rgba(255, 180, 190, 0.92)";
+  ctx.lineWidth = 1.5;
+  ctx.fillRect(-size / 2, -size / 2, size, size);
+  ctx.strokeRect(-size / 2, -size / 2, size, size);
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(255, 107, 107, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, 18, 0, Math.PI * 2);
+  ctx.stroke();
+
+  drawLabel(ctx, enemyBase.name ?? enemyBase.id, x, y - 18);
+}
+
+function getEnemyHeading(enemy: Enemy): number {
+  const speed = Math.hypot(enemy.velocity.x, enemy.velocity.y);
+  if (speed <= 0.001) {
+    return 0;
+  }
+
+  return Math.atan2(enemy.velocity.x, -enemy.velocity.y);
+}
+
+function drawImageEnemyIcon(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  enemy: Enemy,
+): boolean {
+  if (!image.complete || image.naturalWidth === 0) {
+    return false;
+  }
+
+  const iconSize = enemy.platform === "airplane" ? 32 : 26;
+  ctx.save();
+  ctx.translate(enemy.position.x, enemy.position.y);
+  ctx.rotate(getEnemyHeading(enemy));
+  ctx.globalAlpha = enemy.platform === "airplane" ? 0.9 : 0.95;
+  ctx.filter =
+    enemy.platform === "airplane"
+      ? "invert(1) brightness(1.35) contrast(1.15)"
+      : "invert(1) brightness(1.55) contrast(1.25)";
+  ctx.drawImage(image, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
+  ctx.restore();
+  return true;
+}
+
 function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy): void {
-  const width = 14;
-  const height = 16;
+  const icon = enemy.platform === "airplane" ? airplaneIcon : droneIcon;
   const x = enemy.position.x;
   const y = enemy.position.y;
 
-  ctx.fillStyle = enemyColor;
+  ctx.fillStyle = enemy.platform === "airplane"
+    ? "rgba(255, 107, 107, 0.18)"
+    : "rgba(255, 209, 102, 0.16)";
+  ctx.strokeStyle = enemy.platform === "airplane"
+    ? "rgba(255, 107, 107, 0.78)"
+    : "rgba(255, 209, 102, 0.72)";
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.moveTo(x, y - height / 2);
-  ctx.lineTo(x - width / 2, y + height / 2);
-  ctx.lineTo(x + width / 2, y + height / 2);
-  ctx.closePath();
+  ctx.arc(x, y, enemy.platform === "airplane" ? 17 : 15, 0, Math.PI * 2);
   ctx.fill();
+  ctx.stroke();
+
+  if (!drawImageEnemyIcon(ctx, icon, enemy)) {
+    const width = 14;
+    const height = 16;
+
+    ctx.fillStyle = enemyColor;
+    ctx.beginPath();
+    ctx.moveTo(x, y - height / 2);
+    ctx.lineTo(x - width / 2, y + height / 2);
+    ctx.lineTo(x + width / 2, y + height / 2);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   drawLabel(ctx, enemy.name ?? enemy.id, x, y - 14);
 }
@@ -449,13 +553,46 @@ function drawAssignments(
   ctx.setLineDash([]);
 }
 
+function drawEnemyDeployments(
+  ctx: CanvasRenderingContext2D,
+  enemyBases: EnemyBase[],
+  enemies: Enemy[],
+): void {
+  ctx.strokeStyle = enemyDeploymentLineColor;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([4, 6]);
+
+  for (const enemy of enemies) {
+    if (!enemy.originBaseId) {
+      continue;
+    }
+
+    const enemyBase = enemyBases.find((base) => base.id === enemy.originBaseId);
+    if (!enemyBase) {
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(enemyBase.position.x, enemyBase.position.y);
+    ctx.lineTo(enemy.position.x, enemy.position.y);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+}
+
 export function renderEntities(ctx: CanvasRenderingContext2D, data: EntityRenderData): void {
   drawThreatHeatmap(ctx, data.bases);
   drawAssignments(ctx, data.assignments, data.resources, data.bases);
+  drawEnemyDeployments(ctx, data.enemyBases, data.enemies);
 
   // Positions are already mapped into canvas space by the data loader.
   for (const base of data.bases) {
     drawBase(ctx, base);
+  }
+
+  for (const enemyBase of data.enemyBases) {
+    drawEnemyBase(ctx, enemyBase);
   }
 
   for (const enemy of data.enemies) {

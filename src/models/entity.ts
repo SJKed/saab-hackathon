@@ -1,4 +1,5 @@
 export type EnemyType = "attacker" | "flanker" | "recon";
+export type EnemyPlatform = "airplane" | "drone";
 export type ResourceType = "drone" | "air-defense" | "robot";
 
 export interface Vector {
@@ -14,13 +15,21 @@ export interface Base {
   threat: number;
 }
 
+export interface EnemyBase {
+  id: string;
+  name?: string;
+  position: Vector;
+}
+
 export interface Enemy {
   id: string;
   name?: string;
   position: Vector;
   velocity: Vector;
   type: EnemyType;
+  platform: EnemyPlatform;
   threatLevel: number;
+  originBaseId?: string;
   targetId?: string;
 }
 
@@ -38,6 +47,7 @@ export interface Resource {
 // Type aliases are useful when importing a "model" naming style elsewhere.
 export type VectorModel = Vector;
 export type BaseModel = Base;
+export type EnemyBaseModel = EnemyBase;
 export type EnemyModel = Enemy;
 export type ResourceModel = Resource;
 
@@ -62,7 +72,9 @@ export const mockEnemies: Enemy[] = [
     position: { x: 280, y: 60 },
     velocity: { x: 0.2, y: 1.5 },
     type: "attacker",
+    platform: "airplane",
     threatLevel: 0.9,
+    originBaseId: "EB1",
     targetId: "B1",
   },
   {
@@ -70,7 +82,9 @@ export const mockEnemies: Enemy[] = [
     position: { x: 640, y: 90 },
     velocity: { x: -0.25, y: 1.2 },
     type: "flanker",
+    platform: "drone",
     threatLevel: 0.7,
+    originBaseId: "EB2",
     targetId: "B2",
   },
 ];

@@ -2,7 +2,7 @@ import { loadMapData } from "./data/loader";
 import { allocateResources } from "./engine/allocation";
 import type { ResourceAssignment } from "./engine/allocation";
 import { calculateThreatsForBases } from "./engine/threat";
-import { updateEnemyPositions } from "./simulation/updater";
+import { createEnemyDeployments, updateEnemyPositions } from "./simulation/updater";
 import type { StrategyMode } from "./ui/controls";
 import { createControls } from "./ui/controls";
 import { createInfoPanel } from "./ui/info-panel";
@@ -37,15 +37,15 @@ let mapData = loadMapData({
   height: window.innerHeight,
 });
 let bases = mapData.bases.map((base) => ({ ...base, position: { ...base.position } }));
+let enemyBases = mapData.enemyBases.map((enemyBase) => ({
+  ...enemyBase,
+  position: { ...enemyBase.position },
+}));
 let resources = mapData.resources.map((resource) => ({
   ...resource,
   position: { ...resource.position },
 }));
-let enemies = mapData.enemySpawnZones.map((enemy) => ({
-  ...enemy,
-  position: { ...enemy.position },
-  velocity: { ...enemy.velocity },
-}));
+let enemies = createEnemyDeployments(enemyBases, bases);
 let assignments: ResourceAssignment[] = [];
 let hoverPoint: { x: number; y: number } | null = null;
 let lastFrameTimestamp = performance.now();
@@ -69,15 +69,15 @@ function resetSimulationState(width: number, height: number): void {
   canvas.height = height;
   mapData = loadMapData({ width, height });
   bases = mapData.bases.map((base) => ({ ...base, position: { ...base.position } }));
+  enemyBases = mapData.enemyBases.map((enemyBase) => ({
+    ...enemyBase,
+    position: { ...enemyBase.position },
+  }));
   resources = mapData.resources.map((resource) => ({
     ...resource,
     position: { ...resource.position },
   }));
-  enemies = mapData.enemySpawnZones.map((enemy) => ({
-    ...enemy,
-    position: { ...enemy.position },
-    velocity: { ...enemy.velocity },
-  }));
+  enemies = createEnemyDeployments(enemyBases, bases);
   assignments = [];
   tickAccumulatorMs = 0;
 }
@@ -147,6 +147,7 @@ function renderLoop(timestamp: number): void {
   drawGrid();
   renderEntities(ctx, {
     bases,
+    enemyBases,
     enemies,
     resources,
     assignments,
