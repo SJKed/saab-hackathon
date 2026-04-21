@@ -1,9 +1,17 @@
-import type { Base, Enemy, EnemyBase, Resource } from "../models/entity";
+import type {
+  AlliedCity,
+  AlliedSpawnZone,
+  Enemy,
+  EnemyBase,
+  Resource,
+} from "../models/entity";
 import type { NormalizedMapData } from "../data/loader";
 import type { ResourceAssignment } from "../engine/allocation";
+import { predictIntercept } from "../engine/intercept";
 
 type EntityRenderData = {
-  bases: Base[];
+  alliedCities: AlliedCity[];
+  alliedSpawnZones: AlliedSpawnZone[];
   enemyBases: EnemyBase[];
   enemies: Enemy[];
   resources: Resource[];
@@ -12,12 +20,15 @@ type EntityRenderData = {
   hoverPoint: { x: number; y: number } | null;
 };
 
-const baseColor = "#ffd166";
+const cityColor = "#ffd166";
+const alliedSpawnZoneColor = "#4cc9f0";
 const enemyColor = "#ff6b6b";
 const enemyBaseColor = "#d1495b";
 const resourceColor = "#4cc9f0";
 const labelColor = "#e0e0e0";
 const assignmentColor = "rgba(76, 201, 240, 0.7)";
+const interceptAssignmentColor = "rgba(255, 183, 3, 0.78)";
+const alliedDeploymentLineColor = "rgba(76, 201, 240, 0.36)";
 const enemyDeploymentLineColor = "rgba(255, 107, 107, 0.45)";
 const hoverPointRadius = 18;
 const airplaneIcon = createIcon(new URL("../../assets/airplane.png", import.meta.url).href);
@@ -131,18 +142,38 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
   const items: TooltipItem[] = [];
   const { x, y } = data.hoverPoint;
 
-  for (const base of data.bases) {
-    const distance = Math.hypot(base.position.x - x, base.position.y - y);
+  for (const city of data.alliedCities) {
+    const distance = Math.hypot(city.position.x - x, city.position.y - y);
     if (distance <= hoverPointRadius) {
       items.push({
         icon: "▣",
-        title: base.name ?? base.id,
+        title: city.name ?? city.id,
         lines: [
-          `Type: Friendly Base`,
-          `ID: ${base.id}`,
-          `Threat: ${base.threat.toFixed(4)}`,
-          `Priority Value: ${base.value.toFixed(1)}`,
-          `Position: (${Math.round(base.position.x)}, ${Math.round(base.position.y)})`,
+          `Type: Allied City`,
+          `ID: ${city.id}`,
+          `Threat: ${city.threat.toFixed(4)}`,
+          `Priority Value: ${city.value.toFixed(1)}`,
+          `Position: (${Math.round(city.position.x)}, ${Math.round(city.position.y)})`,
+        ],
+      });
+    }
+  }
+
+  for (const spawnZone of data.alliedSpawnZones) {
+    const distance = Math.hypot(spawnZone.position.x - x, spawnZone.position.y - y);
+    if (distance <= hoverPointRadius) {
+      const deployedCount = data.resources.filter(
+        (resource) => resource.originSpawnZoneId === spawnZone.id,
+      ).length;
+
+      items.push({
+        icon: "□",
+        title: spawnZone.name ?? spawnZone.id,
+        lines: [
+          `Type: Allied Spawn Zone`,
+          `ID: ${spawnZone.id}`,
+          `Deployed Resources: ${deployedCount}`,
+          `Position: (${Math.round(spawnZone.position.x)}, ${Math.round(spawnZone.position.y)})`,
         ],
       });
     }
@@ -151,15 +182,23 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
   for (const resource of data.resources) {
     const distance = Math.hypot(resource.position.x - x, resource.position.y - y);
     if (distance <= hoverPointRadius) {
+      const assignment = data.assignments.find(
+        (item) => item.resourceId === resource.id,
+      );
+      const missionStatus = assignment
+        ? `${assignment.mission === "intercept" ? "Intercepting" : "Reinforcing"} ${assignment.targetName}`
+        : "Available";
+
       items.push({
         icon: "●",
         title: resource.name ?? resource.id,
         lines: [
           `Type: Resource (${resource.type})`,
           `ID: ${resource.id}`,
+          `Origin: ${resource.originSpawnZoneId ?? "Unknown"}`,
           `Speed: ${resource.speed.toFixed(1)}`,
           `Range: ${resource.range.toFixed(1)}`,
-          `Status: ${resource.available ? "Available" : "Assigned"}`,
+          `Status: ${missionStatus}`,
           `Position: (${Math.round(resource.position.x)}, ${Math.round(resource.position.y)})`,
         ],
       });
@@ -379,14 +418,51 @@ function drawLabel(
   ctx.fillText(label, x, y);
 }
 
-function drawBase(ctx: CanvasRenderingContext2D, base: Base): void {
-  const size = 14;
-  const x = base.position.x - size / 2;
-  const y = base.position.y - size / 2;
+function drawAlliedCity(ctx: CanvasRenderingContext2D, city: AlliedCity): void {
+  const size = 18;
+  const x = city.position.x;
+  const y = city.position.y;
 
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(x, y, size, size);
-  drawLabel(ctx, base.name ?? base.id, base.position.x, base.position.y - 12);
+  ctx.fillStyle = "rgba(255, 209, 102, 0.22)";
+  ctx.strokeStyle = cityColor;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.arc(x, y, 17, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = cityColor;
+  ctx.fillRect(x - size / 2, y - size / 4, size / 3, size / 2);
+  ctx.fillRect(x - size / 12, y - size / 2, size / 3, size * 0.75);
+  ctx.fillRect(x + size / 3, y - size / 6, size / 3, size * 0.42);
+
+  drawLabel(ctx, city.name ?? city.id, x, y - 20);
+}
+
+function drawAlliedSpawnZone(
+  ctx: CanvasRenderingContext2D,
+  spawnZone: AlliedSpawnZone,
+): void {
+  const size = 18;
+  const x = spawnZone.position.x;
+  const y = spawnZone.position.y;
+
+  ctx.strokeStyle = alliedSpawnZoneColor;
+  ctx.fillStyle = "rgba(76, 201, 240, 0.14)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.rect(x - size / 2, y - size / 2, size, size);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x - 5, y);
+  ctx.lineTo(x + 5, y);
+  ctx.moveTo(x, y - 5);
+  ctx.lineTo(x, y + 5);
+  ctx.stroke();
+
+  drawLabel(ctx, spawnZone.name ?? spawnZone.id, x, y - 15);
 }
 
 function drawEnemyBase(ctx: CanvasRenderingContext2D, enemyBase: EnemyBase): void {
@@ -482,29 +558,41 @@ function drawResource(ctx: CanvasRenderingContext2D, resource: Resource): void {
   const radius = 7;
   const x = resource.position.x;
   const y = resource.position.y;
+  const speed = Math.hypot(resource.velocity.x, resource.velocity.y);
 
   ctx.fillStyle = resourceColor;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.fill();
 
+  if (speed > 0.1) {
+    const directionX = resource.velocity.x / speed;
+    const directionY = resource.velocity.y / speed;
+    ctx.strokeStyle = "rgba(76, 201, 240, 0.86)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + directionX * 14, y + directionY * 14);
+    ctx.stroke();
+  }
+
   drawLabel(ctx, resource.name ?? resource.id, x, y - 12);
 }
 
-function drawThreatHeatmap(ctx: CanvasRenderingContext2D, bases: Base[]): void {
-  for (const base of bases) {
-    const intensity = Math.max(0, Math.min(1, base.threat * 110));
+function drawThreatHeatmap(ctx: CanvasRenderingContext2D, cities: AlliedCity[]): void {
+  for (const city of cities) {
+    const intensity = Math.max(0, Math.min(1, city.threat * 110));
     if (intensity <= 0) {
       continue;
     }
 
     const radius = 90 + intensity * 70;
     const gradient = ctx.createRadialGradient(
-      base.position.x,
-      base.position.y,
+      city.position.x,
+      city.position.y,
       8,
-      base.position.x,
-      base.position.y,
+      city.position.x,
+      city.position.y,
       radius,
     );
 
@@ -513,41 +601,111 @@ function drawThreatHeatmap(ctx: CanvasRenderingContext2D, bases: Base[]): void {
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(base.position.x, base.position.y, radius, 0, Math.PI * 2);
+    ctx.arc(city.position.x, city.position.y, radius, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+function getAssignmentTarget(
+  resource: Resource,
+  assignment: ResourceAssignment,
+  cities: AlliedCity[],
+  enemies: Enemy[],
+): { x: number; y: number } | undefined {
+  if (assignment.mission === "intercept") {
+    const enemy = enemies.find((item) => item.id === assignment.targetId);
+    if (!enemy) {
+      return undefined;
+    }
+
+    return predictIntercept(resource, enemy, cities)?.point ?? enemy.position;
+  }
+
+  return cities.find((city) => city.id === assignment.targetId)?.position;
 }
 
 function drawAssignments(
   ctx: CanvasRenderingContext2D,
   assignments: ResourceAssignment[],
   resources: Resource[],
-  bases: Base[],
+  cities: AlliedCity[],
+  enemies: Enemy[],
 ): void {
-  ctx.strokeStyle = assignmentColor;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 5]);
 
   for (const assignment of assignments) {
     const resource = resources.find((item) => item.id === assignment.resourceId);
-    const base = bases.find((item) => item.id === assignment.baseId);
-
-    if (!resource || !base) {
+    if (!resource) {
       continue;
     }
 
+    const target = getAssignmentTarget(resource, assignment, cities, enemies);
+    if (!target) {
+      continue;
+    }
+
+    ctx.strokeStyle =
+      assignment.mission === "intercept" ? interceptAssignmentColor : assignmentColor;
     ctx.beginPath();
     ctx.moveTo(resource.position.x, resource.position.y);
-    ctx.lineTo(base.position.x, base.position.y);
+    ctx.lineTo(target.x, target.y);
     ctx.stroke();
 
-    const midpointX = (resource.position.x + base.position.x) * 0.5;
-    const midpointY = (resource.position.y + base.position.y) * 0.5;
-    const allocationLabel = `${assignment.resourceName} -> ${assignment.baseName}`;
+    if (assignment.mission === "intercept") {
+      ctx.fillStyle = interceptAssignmentColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const midpointX = (resource.position.x + target.x) * 0.5;
+    const midpointY = (resource.position.y + target.y) * 0.5;
+    const allocationLabel = `${
+      assignment.mission === "intercept" ? "INT" : "RFT"
+    }: ${assignment.resourceName} -> ${assignment.targetName}`;
     ctx.font = "11px Arial";
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(224, 224, 224, 0.9)";
     ctx.fillText(allocationLabel, midpointX, midpointY - 6);
+  }
+
+  ctx.setLineDash([]);
+}
+
+function drawAlliedDeployments(
+  ctx: CanvasRenderingContext2D,
+  spawnZones: AlliedSpawnZone[],
+  resources: Resource[],
+): void {
+  ctx.strokeStyle = alliedDeploymentLineColor;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([3, 7]);
+
+  for (const resource of resources) {
+    if (!resource.originSpawnZoneId) {
+      continue;
+    }
+
+    const spawnZone = spawnZones.find(
+      (item) => item.id === resource.originSpawnZoneId,
+    );
+    if (!spawnZone) {
+      continue;
+    }
+
+    const distanceFromOrigin = Math.hypot(
+      resource.position.x - spawnZone.position.x,
+      resource.position.y - spawnZone.position.y,
+    );
+    if (distanceFromOrigin <= 5) {
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(spawnZone.position.x, spawnZone.position.y);
+    ctx.lineTo(resource.position.x, resource.position.y);
+    ctx.stroke();
   }
 
   ctx.setLineDash([]);
@@ -582,13 +740,24 @@ function drawEnemyDeployments(
 }
 
 export function renderEntities(ctx: CanvasRenderingContext2D, data: EntityRenderData): void {
-  drawThreatHeatmap(ctx, data.bases);
-  drawAssignments(ctx, data.assignments, data.resources, data.bases);
+  drawThreatHeatmap(ctx, data.alliedCities);
+  drawAlliedDeployments(ctx, data.alliedSpawnZones, data.resources);
+  drawAssignments(
+    ctx,
+    data.assignments,
+    data.resources,
+    data.alliedCities,
+    data.enemies,
+  );
   drawEnemyDeployments(ctx, data.enemyBases, data.enemies);
 
   // Positions are already mapped into canvas space by the data loader.
-  for (const base of data.bases) {
-    drawBase(ctx, base);
+  for (const city of data.alliedCities) {
+    drawAlliedCity(ctx, city);
+  }
+
+  for (const spawnZone of data.alliedSpawnZones) {
+    drawAlliedSpawnZone(ctx, spawnZone);
   }
 
   for (const enemyBase of data.enemyBases) {

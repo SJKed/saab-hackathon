@@ -109,7 +109,9 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
       item.style.background = "rgba(16, 36, 42, 0.7)";
 
       const header = document.createElement("div");
-      header.textContent = `${assignment.resourceName} -> ${assignment.baseName}`;
+      const missionLabel =
+        assignment.mission === "intercept" ? "Intercept" : "Reinforce";
+      header.textContent = `${missionLabel}: ${assignment.resourceName} -> ${assignment.targetName}`;
       header.style.color = "#f5f5f5";
       header.style.fontSize = "12px";
       header.style.fontWeight = "bold";

@@ -102,4 +102,19 @@ Implement:
 - User must click "Start" to begin simulation
 - This behaviour should be consistent when pressing restart as well
 
-Output:- Game starts paused, user clicks "Start" to begin.
+Output:
+- Game starts paused, user clicks "Start" to begin.
+
+🧩 Prompt 13 - Resource deployment
+Changes: 
+- Allied cities, Callhaven, Solano and Meridia are cities (priority defensible positions) and not allocatable resources.
+Implement:
+- Update map data to classify Callhaven, Solano, and Meridia as allied cities instead of resources
+- Update rendering to reflect this change (e.g., different icons or colors)
+- map.json "bases" data should act as the "alliedSpawnZones" for resources.
+- Allied resources should be deployed from allied spawn zones (bases) and either intercept enemy resources or reinforce allied cities.
+- Allied resources should determine trajetory to enemy resource as to intercept them before they reach allied cities.
+
+Output:
+- Callhaven, Solano, and Meridia are now classified as allied cities and not resources.
+- Allied resources are deployed from allied spawn zones (bases) and can intercept enemy resources or reinforce allied cities.
