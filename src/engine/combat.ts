@@ -252,6 +252,10 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
+    if (resource.engagedWithId != null) {
+      continue;
+    }
+
     for (let baseIndex = 0; baseIndex < enemyBases.length; baseIndex += 1) {
       const enemyBase = enemyBases[baseIndex];
       if (enemyBase.health <= 0) {
