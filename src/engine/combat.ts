@@ -14,10 +14,29 @@ type UnitWithCombat = {
   health: number;
 };
 
+export type CombatUnitCategory =
+  | "allied-city"
+  | "allied-spawn-zone"
+  | "enemy-base"
+  | "enemy"
+  | "resource";
+
+export type CombatUnitReference = {
+  id: string;
+  name: string;
+  category: CombatUnitCategory;
+};
+
 export type CombatLogEvent = {
   id: string;
   tick: number;
+  kind: "engagement" | "destroyed";
   message: string;
+  source?: CombatUnitReference;
+  target?: CombatUnitReference;
+  destroyedUnit?: CombatUnitReference;
+  inflictedToTarget?: number;
+  inflictedToSource?: number;
 };
 
 export type CombatResolutionInput = {
@@ -73,24 +92,48 @@ function getUnitName(unit: { id: string; name?: string }): string {
   return unit.name ?? unit.id;
 }
 
+function getUnitReference(
+  unit: { id: string; name?: string },
+  category: CombatUnitCategory,
+): CombatUnitReference {
+  return {
+    id: unit.id,
+    name: getUnitName(unit),
+    category,
+  };
+}
+
 function createExchangeEvent(
   tick: number,
   source: UnitWithCombat,
+  sourceCategory: CombatUnitCategory,
   target: UnitWithCombat,
+  targetCategory: CombatUnitCategory,
   inflictedToTarget: number,
   inflictedToSource: number,
 ): CombatLogEvent {
   return {
     id: `${tick}-engage-${source.id}-${target.id}`,
     tick,
+    kind: "engagement",
+    source: getUnitReference(source, sourceCategory),
+    target: getUnitReference(target, targetCategory),
+    inflictedToTarget,
+    inflictedToSource,
     message: `${getUnitName(source)} engaged ${getUnitName(target)}. ${getUnitName(source)} dealt ${inflictedToTarget.toFixed(2)} and received ${inflictedToSource.toFixed(2)} damage.`,
   };
 }
 
-function createDestroyedEvent(tick: number, unit: UnitWithCombat): CombatLogEvent {
+function createDestroyedEvent(
+  tick: number,
+  unit: UnitWithCombat,
+  category: CombatUnitCategory,
+): CombatLogEvent {
   return {
     id: `${tick}-destroyed-${unit.id}`,
     tick,
+    kind: "destroyed",
+    destroyedUnit: getUnitReference(unit, category),
     message: `${getUnitName(unit)} was destroyed.`,
   };
 }
@@ -187,7 +230,9 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
         createExchangeEvent(
           input.tick,
           resource,
+          "resource",
           enemy,
+          "enemy",
           inflictedToDefender,
           inflictedToAttacker,
         ),
@@ -196,13 +241,13 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       if (enemy.health <= 0) {
         resource.engagedWithId = undefined;
         enemy.engagedWithId = undefined;
-        events.push(createDestroyedEvent(input.tick, enemy));
+        events.push(createDestroyedEvent(input.tick, enemy, "enemy"));
       }
 
       if (resource.health <= 0) {
         resource.engagedWithId = undefined;
         enemy.engagedWithId = undefined;
-        events.push(createDestroyedEvent(input.tick, resource));
+        events.push(createDestroyedEvent(input.tick, resource, "resource"));
       }
 
       break;
@@ -234,18 +279,20 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       createExchangeEvent(
         input.tick,
         enemy,
+        "enemy",
         targetCity,
+        "allied-city",
         inflictedToDefender,
         inflictedToAttacker,
       ),
     );
 
     if (targetCity.health <= 0) {
-      events.push(createDestroyedEvent(input.tick, targetCity));
+      events.push(createDestroyedEvent(input.tick, targetCity, "allied-city"));
     }
 
     if (enemy.health <= 0) {
-      events.push(createDestroyedEvent(input.tick, enemy));
+      events.push(createDestroyedEvent(input.tick, enemy, "enemy"));
       continue;
     }
   }
@@ -276,18 +323,20 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
         createExchangeEvent(
           input.tick,
           resource,
+          "resource",
           enemyBase,
+          "enemy-base",
           inflictedToDefender,
           inflictedToAttacker,
         ),
       );
 
       if (enemyBase.health <= 0) {
-        events.push(createDestroyedEvent(input.tick, enemyBase));
+        events.push(createDestroyedEvent(input.tick, enemyBase, "enemy-base"));
       }
 
       if (resource.health <= 0) {
-        events.push(createDestroyedEvent(input.tick, resource));
+        events.push(createDestroyedEvent(input.tick, resource, "resource"));
       }
 
       break;
