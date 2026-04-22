@@ -128,3 +128,10 @@ Output:
 
 Output:
 - Combat calculations are implemented, and an event log displays combat events. Allied resources engage enemy resources in combat until one is destroyed.
+
+🧩 Prompt 15 - Explainability Panel UX
+- Make the explainability panel more user-friendly and visually appealing.
+- Use a clean layout with clear headings and sections for each piece of information (e.g., "Resource Assignment Explanation", "Threat Score", "Priority Score").
+- Consider using icons or color-coding to enhance readability and quickly convey information (e.g., green for low threat, red for high threat).
+- Ensure the panel is responsive and does not obstruct the main game view.
+- Make the panel resizable or collapsible to allow users to customize their view.
