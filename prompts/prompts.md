@@ -135,3 +135,5 @@ Output:
 - Consider using icons or color-coding to enhance readability and quickly convey information (e.g., green for low threat, red for high threat).
 - Ensure the panel is responsive and does not obstruct the main game view.
 - Make the panel resizable or collapsible to allow users to customize their view.
+
+Output:- The explainability panel has a clean layout with clear headings and sections, uses icons and color-coding for readability, is responsive, and can be resized or collapsed to avoid obstructing the main game view.
