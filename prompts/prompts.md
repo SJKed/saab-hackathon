@@ -125,3 +125,6 @@ Output:
 - If an entities health drops to 0 or below, it is removed from the game.
 - Implement an event log that displays combat events (e.g., "Resource A attacked Base B for X damage. Base B has Y health remaining.")
 - When a allied resource engages an enemy resource, the two entities should stop their current trajectory and engage in combat until one is destroyed.
+
+Output:
+- Combat calculations are implemented, and an event log displays combat events. Allied resources engage enemy resources in combat until one is destroyed.
