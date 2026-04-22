@@ -148,13 +148,13 @@ Output:- The explainability panel has a clean layout with clear headings and sec
 - Add structured optional fields to CombatLogEvent while preserving the existing message string:
     - event kind, source/target ids, unit categories, damage values.
     - Use these fields for metrics instead of parsing event text.
-- Add a top-left Metrics HUD UI:
+- Add a Metrics HUD UI:
     - Four to five compact cards with label, value, and color-coded status.
     - Green/yellow/red thresholds for quick demo readability.
-    - Non-obstructive layout: top-left, max width constrained, wraps on smaller screens.
+    - Non-obstructive layout: top, max width constrained, wraps on smaller screens.
 - Wire metrics into main.ts:
     - Initialize metrics state on reset.
     - Update after allocation and combat resolution each simulation tick.
     - Render/update HUD every frame alongside the existing controls and explainability panel.
 Output:
-- A Metrics HUD is added to the top-left corner of the screen, displaying key simulation metrics with color-coded status indicators. The metrics are updated in real-time based on combat events and resource allocations, providing users with insights into the simulation's performance and outcomes.
+- A Metrics HUD is added to the top of the screen, displaying key simulation metrics with color-coded status indicators. The metrics are updated in real-time based on combat events and resource allocations, providing users with insights into the simulation's performance and outcomes.
