@@ -137,3 +137,24 @@ Output:
 - Make the panel resizable or collapsible to allow users to customize their view.
 
 Output:- The explainability panel has a clean layout with clear headings and sections, uses icons and color-coding for readability, is responsive, and can be resized or collapsed to avoid obstructing the main game view.
+
+🧩 Prompt 16 - Metrics HUD
+- Add a small metrics engine that tracks simulation outcomes across ticks:
+    - Cities Protected: live allied cities / initial allied cities.
+    - City Integrity: current allied city health / initial allied city health.
+    - Enemy Neutralized: destroyed moving enemy resources / initial moving enemy resources.
+    - Resource Efficiency: enemy units neutralized per allied resource lost, shown as N / L.
+    - Avg Response: average ticks from enemy deployment to first intercept assignment.
+- Add structured optional fields to CombatLogEvent while preserving the existing message string:
+    - event kind, source/target ids, unit categories, damage values.
+    - Use these fields for metrics instead of parsing event text.
+- Add a Metrics HUD UI:
+    - Four to five compact cards with label, value, and color-coded status.
+    - Green/yellow/red thresholds for quick demo readability.
+    - Non-obstructive layout: top, max width constrained, wraps on smaller screens.
+- Wire metrics into main.ts:
+    - Initialize metrics state on reset.
+    - Update after allocation and combat resolution each simulation tick.
+    - Render/update HUD every frame alongside the existing controls and explainability panel.
+Output:
+- A Metrics HUD is added to the top of the screen, displaying key simulation metrics with color-coded status indicators. The metrics are updated in real-time based on combat events and resource allocations, providing users with insights into the simulation's performance and outcomes.

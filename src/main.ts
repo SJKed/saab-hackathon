@@ -3,6 +3,12 @@ import { allocateResources } from "./engine/allocation";
 import type { ResourceAssignment } from "./engine/allocation";
 import { resolveCombat } from "./engine/combat";
 import type { CombatLogEvent } from "./engine/combat";
+import {
+  createMetricsState,
+  getMetricsSnapshot,
+  updateMetricsState,
+} from "./engine/metrics";
+import type { MetricsState } from "./engine/metrics";
 import { calculateThreatsForCities } from "./engine/threat";
 import {
   createEnemyDeployments,
@@ -12,6 +18,7 @@ import {
 import type { StrategyMode } from "./ui/controls";
 import { createControls } from "./ui/controls";
 import { createInfoPanel } from "./ui/info-panel";
+import { createMetricsHud } from "./ui/metrics-hud";
 import { drawTerrain, renderEntities } from "./ui/renderer";
 
 const canvasElement = document.getElementById("simulation-canvas");
@@ -34,6 +41,7 @@ if (!context) {
 
 const ctx: CanvasRenderingContext2D = context;
 const controls = createControls(appElement);
+const metricsHud = createMetricsHud(appElement);
 const infoPanel = createInfoPanel(appElement);
 const gridSize = 40;
 const simulationTickMs = 250;
@@ -62,6 +70,12 @@ let resources = mapData.resources.map((resource) => ({
 let enemies = createEnemyDeployments(enemyBases, alliedCities);
 let assignments: ResourceAssignment[] = [];
 let eventLog: CombatLogEvent[] = [];
+let metricsState: MetricsState = createMetricsState(
+  alliedCities,
+  enemies,
+  resources,
+  0,
+);
 let hoverPoint: { x: number; y: number } | null = null;
 let lastFrameTimestamp = performance.now();
 let tickAccumulatorMs = 0;
@@ -106,6 +120,7 @@ function resetSimulationState(width: number, height: number): void {
   eventLog = [];
   tickAccumulatorMs = 0;
   simulationTick = 0;
+  metricsState = createMetricsState(alliedCities, enemies, resources, simulationTick);
 }
 
 function resizeCanvas(): void {
@@ -165,6 +180,12 @@ function renderLoop(timestamp: number): void {
 
     const allocationResult = allocateResources(alliedCities, resourcesForAllocation, enemies);
     assignments = allocationResult.assignments;
+    metricsState = updateMetricsState(
+      metricsState,
+      enemies,
+      assignments,
+      simulationTick,
+    );
     resources = updateResourcePositions(
       allocationResult.resources,
       assignments,
@@ -208,6 +229,9 @@ function renderLoop(timestamp: number): void {
     hoverPoint,
   });
   infoPanel.update(assignments, eventLog);
+  metricsHud.update(
+    getMetricsSnapshot(metricsState, alliedCities, enemies, resources, assignments),
+  );
   requestAnimationFrame(renderLoop);
 }
 

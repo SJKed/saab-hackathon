@@ -36,7 +36,7 @@ export function createControls(container: HTMLElement): ControlsApi {
 
   const panel = document.createElement("aside");
   panel.style.position = "absolute";
-  panel.style.top = "16px";
+  panel.style.top = "48px";
   panel.style.right = "16px";
   panel.style.width = "220px";
   panel.style.display = "flex";
