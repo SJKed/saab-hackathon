@@ -49,6 +49,14 @@ export type NormalizedMapData = {
   alliedPlatforms: MobilePlatform[];
   enemyBases: EnemyBase[];
   terrain: NormalizedTerrain;
+  bounds: MapBounds;
+};
+
+export type MapBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
 };
 
 export type NormalizedTerrainZone = {
@@ -303,6 +311,12 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
       landZones: validatedMap.terrain.landZones.map((zone) =>
         normalizeTerrainZone(zone, sourceSize, canvasSize),
       ),
+    },
+    bounds: {
+      minX: 0,
+      maxX: canvasSize.width,
+      minY: 0,
+      maxY: canvasSize.height,
     },
   };
 }

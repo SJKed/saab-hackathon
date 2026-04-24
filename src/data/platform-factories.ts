@@ -22,7 +22,6 @@ type PlatformTemplate = {
   maxSpeed: number;
   cruiseSpeed: number;
   acceleration: number;
-  turnRate: number;
   maxEnduranceSeconds: number;
   combat: Omit<PlatformCombatProfile, "durability">;
   sensors: SensorProfile;
@@ -109,7 +108,6 @@ const alliedFighterTemplate: PlatformTemplate = {
   maxSpeed: 154,
   cruiseSpeed: 126,
   acceleration: 92,
-  turnRate: 0.92,
   maxEnduranceSeconds: 110,
   combat: {
     maxDurability: 130,
@@ -145,7 +143,6 @@ const alliedDroneTemplate: PlatformTemplate = {
   maxSpeed: 104,
   cruiseSpeed: 86,
   acceleration: 48,
-  turnRate: 0.68,
   maxEnduranceSeconds: 156,
   combat: {
     maxDurability: 82,
@@ -181,7 +178,6 @@ const alliedBallisticMissileTemplate: PlatformTemplate = {
   maxSpeed: 182,
   cruiseSpeed: 182,
   acceleration: 136,
-  turnRate: 0.32,
   maxEnduranceSeconds: 68,
   combat: {
     maxDurability: 58,
@@ -211,7 +207,6 @@ const enemyFighterTemplate: PlatformTemplate = {
   maxSpeed: 148,
   cruiseSpeed: 122,
   acceleration: 86,
-  turnRate: 0.84,
   maxEnduranceSeconds: 128,
   combat: {
     maxDurability: 124,
@@ -254,7 +249,6 @@ const enemyDroneTemplate: PlatformTemplate = {
   maxSpeed: 96,
   cruiseSpeed: 78,
   acceleration: 44,
-  turnRate: 0.74,
   maxEnduranceSeconds: 164,
   combat: {
     maxDurability: 74,
@@ -297,7 +291,6 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
   maxSpeed: 188,
   cruiseSpeed: 188,
   acceleration: 140,
-  turnRate: 0.28,
   maxEnduranceSeconds: 70,
   combat: {
     maxDurability: 62,
@@ -371,13 +364,13 @@ function createPlatform(
     maxSpeed: template.maxSpeed,
     cruiseSpeed: template.cruiseSpeed,
     acceleration: template.acceleration,
-    turnRate: template.turnRate,
     enduranceSeconds: template.maxEnduranceSeconds,
     maxEnduranceSeconds: template.maxEnduranceSeconds,
     oneWay: template.oneWay ?? false,
     deploymentDelaySeconds,
     originId,
     targetId,
+    combatPhaseTimeSeconds: 0,
     combat: {
       ...template.combat,
       durability: template.combat.maxDurability,

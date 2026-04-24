@@ -9,6 +9,7 @@ export type ControlsState = {
 type ControlsApi = {
   getState: () => ControlsState;
   consumeRestartRequest: () => boolean;
+  consumeResetViewRequest: () => boolean;
 };
 
 function createControlRow(label: string): HTMLDivElement {
@@ -33,6 +34,7 @@ export function createControls(container: HTMLElement): ControlsApi {
     speedMultiplier: 1,
   };
   let restartRequested = false;
+  let resetViewRequested = false;
 
   const panel = document.createElement("aside");
   panel.style.position = "absolute";
@@ -83,6 +85,19 @@ export function createControls(container: HTMLElement): ControlsApi {
     startPauseButton.textContent = "Start";
   });
   panel.appendChild(restartButton);
+
+  const resetViewButton = document.createElement("button");
+  resetViewButton.textContent = "Reset View";
+  resetViewButton.style.padding = "8px 10px";
+  resetViewButton.style.background = "#1d2432";
+  resetViewButton.style.color = "#f5f5f5";
+  resetViewButton.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+  resetViewButton.style.borderRadius = "6px";
+  resetViewButton.style.cursor = "pointer";
+  resetViewButton.addEventListener("click", () => {
+    resetViewRequested = true;
+  });
+  panel.appendChild(resetViewButton);
 
   const strategyRow = createControlRow("Strategy");
   const strategySelect = document.createElement("select");
@@ -138,6 +153,11 @@ export function createControls(container: HTMLElement): ControlsApi {
     consumeRestartRequest: () => {
       const wasRequested = restartRequested;
       restartRequested = false;
+      return wasRequested;
+    },
+    consumeResetViewRequest: () => {
+      const wasRequested = resetViewRequested;
+      resetViewRequested = false;
       return wasRequested;
     },
   };

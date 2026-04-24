@@ -1,0 +1,37 @@
+import type { NormalizedMapData } from "../../data/loader";
+import type { ResourceAssignment } from "../../engine/allocation";
+import type { CombatLogEvent } from "../../engine/combat";
+import type {
+  AlliedCity,
+  AlliedSpawnZone,
+  EnemyBase,
+  MobilePlatform,
+} from "../../models/entity";
+
+export type CombatVisualEffect = {
+  id: string;
+  kind: "tracer" | "missileTrail" | "impactRing" | "strikeBurst";
+  sourceId?: string;
+  targetId?: string;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  color: string;
+  createdAtMs: number;
+  durationMs: number;
+  weaponClass?: CombatLogEvent["weaponClass"];
+  intensity?: number;
+};
+
+export type EntityRenderData = {
+  alliedCities: AlliedCity[];
+  alliedSpawnZones: AlliedSpawnZone[];
+  enemyBases: EnemyBase[];
+  enemyPlatforms: MobilePlatform[];
+  alliedPlatforms: MobilePlatform[];
+  assignments: ResourceAssignment[];
+  combatEffects: CombatVisualEffect[];
+  terrain: NormalizedMapData["terrain"];
+  hoverPointWorld: { x: number; y: number } | null;
+  hoverPointScreen: { x: number; y: number } | null;
+  viewZoom: number;
+};

@@ -13,6 +13,13 @@ import {
   isPlatformDestroyed,
   isPlatformStored,
 } from "../models/platform-utils";
+import {
+  applyPostureMemory,
+  createTeamPostureMemory,
+  evaluateEnemyForcePosture,
+  type EnemyForcePostureSnapshot,
+  type TeamPostureMemory,
+} from "./posture";
 
 export type EnemyAggressionTier = "opening" | "pressure" | "surge";
 
@@ -49,12 +56,14 @@ export type EnemyDirectorSnapshot = {
   aggressionPercent: number;
   activeEnemyCount: number;
   activeEnemyCap: number;
+  postureSnapshot: EnemyForcePostureSnapshot;
   cityExposureScores: CityExposureBreakdown[];
   recentLaunches: string[];
 };
 
 export type EnemyDirectorState = {
   baseStates: Record<string, BaseDirectorState>;
+  postureMemory: TeamPostureMemory;
   snapshot: EnemyDirectorSnapshot;
 };
 
@@ -457,15 +466,33 @@ export function createEnemyDirectorState(
       },
     ]),
   );
+  const postureMemory = createTeamPostureMemory();
 
   return {
     baseStates,
+    postureMemory,
     snapshot: {
       aggressionTier: "opening",
       aggressionLabel: "Opening Probe",
       aggressionPercent: 26,
       activeEnemyCount: 0,
       activeEnemyCap: Math.max(1, enemyBases.length + 1),
+      postureSnapshot: {
+        stance: "balanced",
+        summary: "Launch appetite and active pressure are broadly matched.",
+        demandScore: 0,
+        activeBurdenScore: 0,
+        usefulAirborneScore: 0,
+        reserveScore: 0,
+        surplusScore: 0,
+        sustainedSurplusSeconds: 0,
+        sustainedDemandSeconds: 0,
+        recallPressureActive: false,
+        launchReleaseActive: false,
+        recommendedActiveCount: Math.max(1, enemyBases.length),
+        opportunityCount: 0,
+        cityStates: [],
+      },
       cityExposureScores: [],
       recentLaunches: [],
     },
@@ -479,6 +506,7 @@ export function coordinateEnemyDeployments(
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
   enemyBases: EnemyBase[],
+  deltaSeconds: number,
 ): CoordinateEnemyDeploymentsResult {
   const profile = getAggressionProfile(tick, enemyBases.length);
   const cityExposureScores = getTopCityExposureScores(
@@ -486,11 +514,37 @@ export function coordinateEnemyDeployments(
     alliedPlatforms,
     enemyPlatforms,
   );
+  const posture = applyPostureMemory(
+    evaluateEnemyForcePosture(
+      alliedCities,
+      alliedPlatforms,
+      enemyPlatforms,
+      profile.aggressionPercent / 100,
+    ),
+    state.postureMemory,
+    deltaSeconds,
+    {
+      surplusThreshold: 1.9,
+      demandGapThreshold: 1,
+    },
+  );
+  const postureSnapshot = posture.snapshot;
+  const postureByCityId = new Map(
+    postureSnapshot.cityStates.map((cityState) => [cityState.cityId, cityState]),
+  );
   const updatedBaseStates: Record<string, BaseDirectorState> = { ...state.baseStates };
   let updatedEnemyPlatforms = enemyPlatforms.map(clonePlatform);
+  const effectiveActiveEnemyCap = Math.min(
+    profile.activeEnemyCap,
+    Math.max(
+      enemyBases.length,
+      postureSnapshot.recommendedActiveCount +
+        (profile.tier === "surge" ? 1 : 0),
+    ),
+  );
   let availableSlots = Math.max(
     0,
-    profile.activeEnemyCap -
+    effectiveActiveEnemyCap -
       updatedEnemyPlatforms.filter((platform) => isPlatformDeployed(platform)).length,
   );
   const recentLaunches = [...state.snapshot.recentLaunches];
@@ -529,6 +583,19 @@ export function coordinateEnemyDeployments(
       continue;
     }
 
+    const targetCityPosture = postureByCityId.get(targetCityExposure.cityId);
+    if (
+      postureSnapshot.recallPressureActive &&
+      !postureSnapshot.launchReleaseActive &&
+      (targetCityPosture?.unmetPressure ?? 0) < 1.9
+    ) {
+      updatedBaseStates[enemyBase.id] = {
+        ...baseState,
+        nextLaunchTick: tick + Math.max(6, Math.floor(profile.intervalTicks / 2)),
+      };
+      continue;
+    }
+
     const waveSize = getWaveSize(
       profile,
       baseState,
@@ -536,10 +603,14 @@ export function coordinateEnemyDeployments(
       availableSlots,
       storedPlatforms.length,
     );
+    const demandLimitedWaveSize = Math.max(
+      1,
+      Math.ceil((targetCityPosture?.unmetPressure ?? targetCityExposure.exposure) / 1.85),
+    );
     const selectedPlatforms = selectPlatformsForWave(
       storedPlatforms,
       profile,
-      waveSize,
+      Math.min(waveSize, demandLimitedWaveSize),
       targetCityExposure,
     );
     if (selectedPlatforms.length === 0) {
@@ -582,7 +653,8 @@ export function coordinateEnemyDeployments(
     };
     recentLaunches.unshift(
       `${enemyBase.name ?? enemyBase.id} launched ${getWaveSummary(selectedPlatforms)} toward ` +
-        `${targetCityExposure.cityName}. ${getLaunchReason(targetCityExposure)}`,
+        `${targetCityExposure.cityName}. ${getLaunchReason(targetCityExposure)} ` +
+        `${postureSnapshot.summary}`,
     );
   }
 
@@ -593,13 +665,15 @@ export function coordinateEnemyDeployments(
   return {
     enemyPlatforms: updatedEnemyPlatforms,
     directorState: {
-      baseStates: updatedBaseStates,
-      snapshot: {
-        aggressionTier: profile.tier,
-        aggressionLabel: profile.label,
+        baseStates: updatedBaseStates,
+        postureMemory: posture.memory,
+        snapshot: {
+          aggressionTier: profile.tier,
+          aggressionLabel: profile.label,
         aggressionPercent: profile.aggressionPercent,
         activeEnemyCount,
-        activeEnemyCap: profile.activeEnemyCap,
+        activeEnemyCap: effectiveActiveEnemyCap,
+        postureSnapshot,
         cityExposureScores: cityExposureScores.slice(0, 3),
         recentLaunches: recentLaunches.slice(0, maxRecentLaunches),
       },

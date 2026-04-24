@@ -17,6 +17,12 @@ export type UnitStatus =
   | "reinforcing"
   | "returning"
   | "destroyed";
+export type CombatPhase =
+  | "pursuing"
+  | "attackRun"
+  | "evading"
+  | "repositioning"
+  | "disengaging";
 export type TargetType = PlatformClass | "city" | "spawnZone" | "base";
 export type PlatformRole = "interceptor" | "strike" | "recon" | "patrol";
 
@@ -93,12 +99,14 @@ export interface MobilePlatform {
   maxSpeed: number;
   cruiseSpeed: number;
   acceleration: number;
-  turnRate: number;
   enduranceSeconds: number;
   maxEnduranceSeconds: number;
   oneWay: boolean;
   deploymentDelaySeconds: number;
   engagedWithId?: string;
+  combatPhase?: CombatPhase;
+  combatPhaseTimeSeconds: number;
+  disengageReason?: string;
   originId?: string;
   targetId?: string;
   combat: PlatformCombatProfile;

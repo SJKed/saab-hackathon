@@ -15,6 +15,13 @@ import {
   weaponSupportsTarget,
 } from "../models/platform-utils";
 import { predictIntercept } from "./intercept";
+import {
+  applyPostureMemory,
+  evaluateAlliedForcePosture,
+  getAlliedCoverageScoreForCity,
+  type AlliedForcePostureSnapshot,
+  type TeamPostureMemory,
+} from "./posture";
 
 export type ResourceMission = "intercept" | "reinforce";
 
@@ -36,6 +43,8 @@ export type ResourceAssignment = {
 
 export type AllocationResult = {
   assignments: ResourceAssignment[];
+  postureMemory: TeamPostureMemory;
+  postureSnapshot: AlliedForcePostureSnapshot;
 };
 
 type OriginReserve = {
@@ -261,6 +270,28 @@ function getWeaponEffectiveness(
   return hitChance * Math.min(1.4, damageWeight + 0.35);
 }
 
+function getTerminalImpactEffectiveness(
+  alliedPlatform: MobilePlatform,
+  enemyPlatform: MobilePlatform,
+): number {
+  const baseDamage = alliedPlatform.warheadDamage ?? 0;
+  const damageWeight =
+    (baseDamage * 1.2) / Math.max(40, enemyPlatform.combat.maxDurability);
+  const terminalModifier =
+    enemyPlatform.platformClass === "ballisticMissile"
+      ? 1.18
+      : enemyPlatform.platformClass === "fighterJet"
+        ? 1.06
+        : 1;
+  const survivabilityModifier =
+    0.76 + (1 - enemyPlatform.combat.evasion * 0.4) * 0.24;
+
+  return Math.min(
+    1.7,
+    Math.max(0.45, damageWeight * terminalModifier * survivabilityModifier),
+  );
+}
+
 function selectBestWeapon(
   alliedPlatform: MobilePlatform,
   enemyPlatform: MobilePlatform,
@@ -307,7 +338,19 @@ export function allocateResources(
   cities: AlliedCity[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
+  postureMemory: TeamPostureMemory,
+  deltaSeconds: number,
 ): AllocationResult {
+  const posture = applyPostureMemory(
+    evaluateAlliedForcePosture(cities, alliedPlatforms, enemyPlatforms),
+    postureMemory,
+    deltaSeconds,
+    {
+      surplusThreshold: 2.15,
+      demandGapThreshold: 1.15,
+    },
+  );
+  const postureSnapshot = posture.snapshot;
   const assignments: ResourceAssignment[] = [];
   const reservedPlatformIds = new Set<string>();
   const storedReserveByOrigin = getStoredReserveByOrigin(alliedPlatforms);
@@ -337,7 +380,7 @@ export function allocateResources(
       }
 
       const weaponSelection = selectBestWeapon(alliedPlatform, enemyPlatform);
-      if (!weaponSelection) {
+      if (!weaponSelection && !alliedPlatform.oneWay) {
         continue;
       }
 
@@ -361,21 +404,31 @@ export function allocateResources(
         alliedPlatform,
         storedReserveByOrigin,
       );
+      const launchPressurePenalty =
+        isPlatformStored(alliedPlatform) && postureSnapshot.surplusScore > 0
+          ? postureSnapshot.surplusScore *
+            (postureSnapshot.recallPressureActive ? 1.2 : 0.75)
+          : 0;
+      const platformEffectiveness = weaponSelection
+        ? weaponSelection.effectiveness
+        : getTerminalImpactEffectiveness(alliedPlatform, enemyPlatform);
 
       const score =
         priorityScore * 1.3 +
-        weaponSelection.effectiveness * 12 +
+        platformEffectiveness *
+          (alliedPlatform.oneWay ? 14 : 12) +
         alliedPlatform.sensors.sensorRange / 50 -
         intercept.timeToIntercept * 1.1 -
-        reservePenalty;
+        reservePenalty -
+        launchPressurePenalty;
 
       if (score > bestScore) {
         bestScore = score;
         bestPlatform = alliedPlatform;
-        bestWeapon = weaponSelection.weapon;
+        bestWeapon = weaponSelection?.weapon;
         bestInterceptDistance = intercept.distance;
         bestInterceptTime = intercept.timeToIntercept;
-        bestEffectiveness = weaponSelection.effectiveness;
+        bestEffectiveness = platformEffectiveness;
         bestReserveContext = getReserveContext(
           alliedPlatform,
           storedReserveByOrigin,
@@ -383,7 +436,7 @@ export function allocateResources(
       }
     }
 
-    if (!bestPlatform || !bestWeapon) {
+    if (!bestPlatform || (!bestWeapon && !bestPlatform.oneWay)) {
       continue;
     }
 
@@ -399,35 +452,69 @@ export function allocateResources(
       threatScore: enemyPlatform.threatLevel,
       priorityScore,
       interceptTimeSeconds: bestInterceptTime,
-      weaponName: bestWeapon.name,
-      weaponClass: bestWeapon.weaponClass,
+      weaponName: bestWeapon?.name ?? "Terminal Impact Run",
+      weaponClass: bestWeapon?.weaponClass,
       expectedEffectiveness: bestEffectiveness,
       reason:
-        `${getPlatformDisplayName(bestPlatform)} can acquire and intercept ` +
-        `${getPlatformDisplayName(enemyPlatform)} before city impact using ` +
-        `${bestWeapon.name}. Sensor reach, endurance margin, and weapon match ` +
-        `outperform the other available platforms. ${bestReserveContext}`,
+        bestPlatform.oneWay
+          ? `${getPlatformDisplayName(bestPlatform)} is committed to a terminal intercept against ` +
+            `${getPlatformDisplayName(enemyPlatform)}. It will ram the target, inflict critical damage, ` +
+            `and be expended in the process. Impact timing and warhead yield make it the strongest last-ditch kill option. ${bestReserveContext}`
+          : `${getPlatformDisplayName(bestPlatform)} can acquire and intercept ` +
+            `${getPlatformDisplayName(enemyPlatform)} before city impact using ` +
+            `${bestWeapon?.name ?? "its selected weapon"}. Sensor reach, endurance margin, and weapon match ` +
+            `outperform the other available platforms. ${bestReserveContext}`,
     });
   }
 
   if (activeEnemyPlatforms.length === 0) {
-    return { assignments };
+    return { assignments, postureMemory: posture.memory, postureSnapshot };
   }
 
-  const threatenedCityIds = new Set(
-    activeEnemyPlatforms
-      .map((enemyPlatform) => enemyPlatform.targetId)
-      .filter((targetId): targetId is string => Boolean(targetId)),
+  const cityPostureById = new Map(
+    postureSnapshot.cityStates.map((cityState) => [cityState.cityId, cityState]),
   );
   const sortedCities = [...cities]
-    .filter(
-      (city) => threatenedCityIds.has(city.id) || city.threat > 0.0025,
-    )
-    .sort(
-    (a, b) => getReinforcementPriority(b) - getReinforcementPriority(a),
-    );
+    .map((city) => ({
+      city,
+      cityPosture: cityPostureById.get(city.id),
+    }))
+    .filter(({ city, cityPosture }) => {
+      if (!cityPosture) {
+        return city.threat > 0.0025;
+      }
 
-  for (const city of sortedCities) {
+      if (cityPosture.activeThreatCount > 0 || cityPosture.inboundPressure >= 0.9) {
+        return true;
+      }
+
+      if (postureSnapshot.stance === "surging") {
+        return cityPosture.unmetCoverage >= 0.2;
+      }
+
+      return cityPosture.unmetCoverage >= 0.75;
+    })
+    .sort((a, b) => {
+      const leftScore =
+        (a.cityPosture?.unmetCoverage ?? 0) * 3.2 +
+        (a.cityPosture?.demandScore ?? getReinforcementPriority(a.city));
+      const rightScore =
+        (b.cityPosture?.unmetCoverage ?? 0) * 3.2 +
+        (b.cityPosture?.demandScore ?? getReinforcementPriority(b.city));
+
+      return rightScore - leftScore;
+    });
+
+  for (const { city, cityPosture } of sortedCities) {
+    if (
+      cityPosture &&
+      postureSnapshot.recallPressureActive &&
+      cityPosture.unmetCoverage < 1.1 &&
+      cityPosture.activeThreatCount === 0
+    ) {
+      continue;
+    }
+
     const priorityScore = getReinforcementPriority(city);
     let bestPlatform: MobilePlatform | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
@@ -447,13 +534,40 @@ export function allocateResources(
         alliedPlatform,
         storedReserveByOrigin,
       );
+      const localCoverage = getAlliedCoverageScoreForCity(alliedPlatform, city);
+      const launchPressurePenalty =
+        isPlatformStored(alliedPlatform) && postureSnapshot.surplusScore > 0
+          ? postureSnapshot.surplusScore *
+            (postureSnapshot.recallPressureActive ? 2.2 : 1.4)
+          : 0;
+      const unmetCoverage = cityPosture?.unmetCoverage ?? Math.max(0, city.threat * 120);
+      if (
+        isPlatformStored(alliedPlatform) &&
+        !postureSnapshot.launchReleaseActive &&
+        postureSnapshot.stance !== "surging" &&
+        unmetCoverage < 1.4
+      ) {
+        continue;
+      }
+
+      if (
+        isPlatformStored(alliedPlatform) &&
+        postureSnapshot.recallPressureActive &&
+        unmetCoverage < 0.55
+      ) {
+        continue;
+      }
+
       const score =
+        unmetCoverage * 8.5 +
+        localCoverage * 1.8 +
         alliedPlatform.sensors.sensorRange / 65 +
         alliedPlatform.enduranceSeconds / 45 -
         distance / 70 +
         city.threat * 18 +
         (isPlatformStored(alliedPlatform) ? 0.2 : 1.1) -
-        (reservePenalty * 1.15);
+        (reservePenalty * 1.15) -
+        launchPressurePenalty;
 
       if (score > bestScore) {
         bestScore = score;
@@ -486,9 +600,9 @@ export function allocateResources(
         `${getPlatformDisplayName(bestPlatform)} is holding a defensive posture ` +
         `over ${city.name ?? city.id} because it has strong sensor coverage, ` +
         `remaining endurance, and the best local response time for inbound threats. ` +
-        `${bestReserveContext}`,
+        `${postureSnapshot.summary} ${bestReserveContext}`,
     });
   }
 
-  return { assignments };
+  return { assignments, postureMemory: posture.memory, postureSnapshot };
 }
