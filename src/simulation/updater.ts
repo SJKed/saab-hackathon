@@ -1,5 +1,6 @@
 import type {
   AlliedCity,
+  AlliedSpawnZone,
   Enemy,
   EnemyBase,
   EnemyPlatform,
@@ -12,6 +13,10 @@ import { getScaledResourceSpeed, predictIntercept } from "../engine/intercept";
 
 const minimumDistanceToTarget = 6;
 const minimumDistanceToResourceTarget = 10;
+const enemySupportRadius = 140;
+const aircraftConservationWeight = 1;
+const droneConservationWeight = 0.5;
+const ordnanceConservationWeight = 0.25;
 
 type DeploymentPlan = {
   platform: EnemyPlatform;
@@ -43,11 +48,11 @@ function distanceSquared(a: { x: number; y: number }, b: { x: number; y: number 
 
 function getEnemySpeed(enemy: Enemy): number {
   if (enemy.platform === "airplane") {
-    return 125;
+    return 70;
   }
 
   if (enemy.platform === "drone") {
-    return 82;
+    return 35;
   }
 
   switch (enemy.type) {
@@ -84,12 +89,75 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
   return nearestCity;
 }
 
+function getEnemyBaseById(enemy: Enemy, enemyBases: EnemyBase[]): EnemyBase | undefined {
+  if (!enemy.originBaseId) {
+    return undefined;
+  }
+  return enemyBases.find((base) => base.id === enemy.originBaseId);
+}
+
+function hasNearbyEngagedAlly(enemy: Enemy, allies: Enemy[]): boolean {
+  return allies.some((ally) => {
+    if (ally.id === enemy.id || !ally.engagedWithId || ally.health <= 0) {
+      return false;
+    }
+    return Math.hypot(
+      ally.position.x - enemy.position.x,
+      ally.position.y - enemy.position.y,
+    ) <= enemySupportRadius;
+  });
+}
+
+function moveToward(
+  enemy: Enemy,
+  targetPosition: Vector,
+  speed: number,
+  deltaSeconds: number,
+): Enemy {
+  const dx = targetPosition.x - enemy.position.x;
+  const dy = targetPosition.y - enemy.position.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= minimumDistanceToTarget) {
+    return { ...enemy, velocity: { x: 0, y: 0 } };
+  }
+  const directionX = dx / distance;
+  const directionY = dy / distance;
+  const movementStep = Math.min(speed * deltaSeconds, distance - minimumDistanceToTarget);
+  return {
+    ...enemy,
+    velocity: { x: directionX * speed, y: directionY * speed },
+    position: {
+      x: enemy.position.x + directionX * movementStep,
+      y: enemy.position.y + directionY * movementStep,
+    },
+  };
+}
+
+function shouldConserveUnit(enemy: Enemy, resources: Resource[]): boolean {
+  const nearestResourceDistance = resources.reduce((closest, resource) => {
+    const distance = Math.hypot(
+      resource.position.x - enemy.position.x,
+      resource.position.y - enemy.position.y,
+    );
+    return Math.min(closest, distance);
+  }, Number.POSITIVE_INFINITY);
+  const healthRatio = enemy.health / Math.max(1, enemy.platform === "airplane" ? 118 : 82);
+  const unitWeight = enemy.platform === "airplane" ? aircraftConservationWeight : droneConservationWeight;
+  const riskScore = unitWeight * (1 - healthRatio) + 120 / Math.max(20, nearestResourceDistance);
+  return riskScore > (enemy.platform === "airplane" ? 1.05 : 1.35);
+}
+
 function getResourceAssignmentTarget(
   resource: Resource,
   assignment: ResourceAssignment,
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   enemies: Enemy[],
 ): Vector | undefined {
+  if (assignment.mission === "reload") {
+    return alliedSpawnZones.find((base) => base.id === assignment.targetId)?.position;
+  }
+
   if (assignment.mission === "intercept") {
     const enemy = enemies.find((item) => item.id === assignment.targetId);
     if (!enemy) {
@@ -138,6 +206,11 @@ export function createEnemyDeployments(
         attack,
         defense,
         health,
+        ordnance: plan.platform === "airplane" ? 14 : 12,
+        maxOrdnance: plan.platform === "airplane" ? 14 : 12,
+        ordnanceRange: plan.platform === "airplane" ? 150 : 130,
+        ordnanceSpeed: plan.platform === "airplane" ? 340 : 300,
+        interceptChance: plan.platform === "airplane" ? 0.2 : 0.26,
       };
     }),
   );
@@ -145,18 +218,69 @@ export function createEnemyDeployments(
 
 export function updateEnemyPositions(
   enemies: Enemy[],
+  enemyBases: EnemyBase[],
   cities: AlliedCity[],
+  resources: Resource[],
   deltaSeconds: number,
 ): Enemy[] {
   if (cities.length === 0 || deltaSeconds <= 0) {
     return enemies;
   }
 
-  return enemies.map((enemy) => {
+  return enemies.map((enemy, _, allEnemies) => {
     if (enemy.engagedWithId) {
       return {
         ...enemy,
         velocity: { x: 0, y: 0 },
+      };
+    }
+
+    const speed = getEnemySpeed(enemy);
+    const originBase = getEnemyBaseById(enemy, enemyBases);
+    const nearbyEngagedAlly = hasNearbyEngagedAlly(enemy, allEnemies);
+
+    if (enemy.ordnance <= 0) {
+      if (originBase) {
+        if (enemy.platform === "airplane" && nearbyEngagedAlly) {
+          const engagedAlly = allEnemies.find(
+            (ally) =>
+              ally.id !== enemy.id &&
+              !!ally.engagedWithId &&
+              Math.hypot(
+                ally.position.x - enemy.position.x,
+                ally.position.y - enemy.position.y,
+              ) <= enemySupportRadius,
+          );
+          if (engagedAlly) {
+            return {
+              ...moveToward(enemy, engagedAlly.position, speed, deltaSeconds),
+              behaviorState: "cover",
+            };
+          }
+        }
+
+        const returning = moveToward(enemy, originBase.position, speed, deltaSeconds);
+        const baseDistance = Math.hypot(
+          returning.position.x - originBase.position.x,
+          returning.position.y - originBase.position.y,
+        );
+        if (baseDistance <= minimumDistanceToTarget) {
+          return {
+            ...returning,
+            ordnance: returning.maxOrdnance,
+            behaviorState: "reload-complete",
+            velocity: { x: 0, y: 0 },
+          };
+        }
+        return {
+          ...returning,
+          behaviorState: "reload",
+        };
+      }
+      return {
+        ...enemy,
+        velocity: { x: 0, y: 0 },
+        behaviorState: "reload",
       };
     }
 
@@ -177,24 +301,21 @@ export function updateEnemyPositions(
       };
     }
 
-    const directionX = dx / distance;
-    const directionY = dy / distance;
-    const speed = getEnemySpeed(enemy);
-    const movementStep = Math.min(speed * deltaSeconds, distance - minimumDistanceToTarget);
+    const conserveWeight = enemy.platform === "airplane" ? aircraftConservationWeight : droneConservationWeight;
+    const ordnancePressure = (1 - enemy.ordnance / Math.max(1, enemy.maxOrdnance)) * ordnanceConservationWeight;
+    const shouldConserve = shouldConserveUnit(enemy, resources) && conserveWeight + ordnancePressure > 1;
 
-    const velocity = {
-      x: directionX * speed,
-      y: directionY * speed,
-    };
+    if (shouldConserve && originBase) {
+      return {
+        ...moveToward(enemy, originBase.position, speed, deltaSeconds),
+        behaviorState: "reload",
+      };
+    }
 
     return {
-      ...enemy,
+      ...moveToward(enemy, targetCity.position, speed, deltaSeconds),
       targetId: targetCity.id,
-      velocity,
-      position: {
-        x: enemy.position.x + directionX * movementStep,
-        y: enemy.position.y + directionY * movementStep,
-      },
+      behaviorState: "attack",
     };
   });
 }
@@ -203,6 +324,7 @@ export function updateResourcePositions(
   resources: Resource[],
   assignments: ResourceAssignment[],
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   enemies: Enemy[],
   deltaSeconds: number,
 ): Resource[] {
@@ -225,6 +347,7 @@ export function updateResourcePositions(
         ...resource,
         available: true,
         velocity: { x: 0, y: 0 },
+        reloadTargetBaseId: undefined,
       };
     }
 
@@ -232,6 +355,7 @@ export function updateResourcePositions(
       resource,
       assignment,
       cities,
+      alliedSpawnZones,
       enemies,
     );
     if (!targetPosition) {
@@ -239,6 +363,7 @@ export function updateResourcePositions(
         ...resource,
         available: true,
         velocity: { x: 0, y: 0 },
+        reloadTargetBaseId: undefined,
       };
     }
 
@@ -247,10 +372,13 @@ export function updateResourcePositions(
     const distance = Math.hypot(dx, dy);
 
     if (distance <= minimumDistanceToResourceTarget) {
+      const didReachReloadBase = assignment.mission === "reload";
       return {
         ...resource,
-        available: false,
+        available: !didReachReloadBase,
         velocity: { x: 0, y: 0 },
+        ordnance: didReachReloadBase ? resource.maxOrdnance : resource.ordnance,
+        reloadTargetBaseId: didReachReloadBase ? undefined : assignment.targetId,
       };
     }
 
@@ -265,6 +393,8 @@ export function updateResourcePositions(
     return {
       ...resource,
       available: false,
+      reloadTargetBaseId:
+        assignment.mission === "reload" ? assignment.targetId : resource.reloadTargetBaseId,
       velocity: {
         x: directionX * speed,
         y: directionY * speed,

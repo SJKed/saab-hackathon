@@ -101,6 +101,18 @@ function getResponseTone(responseTicks: number | null): HudTone {
   return dangerTone;
 }
 
+function getOrdnanceTone(metrics: MetricsSnapshot): HudTone {
+  if (metrics.depletedResourceCount === 0) {
+    return goodTone;
+  }
+
+  if (metrics.depletedResourceCount < Math.max(1, metrics.totalResourceCount / 2)) {
+    return warningTone;
+  }
+
+  return dangerTone;
+}
+
 function applyTone(card: MetricCard, tone: HudTone): void {
   card.root.style.borderColor = "transparent";
   card.root.style.borderLeftColor = tone.color;
@@ -218,12 +230,14 @@ export function createMetricsHud(container: HTMLElement): HudApi {
   const enemyNeutralized = createMetricCard("Enemy Neutralized");
   const resourceEfficiency = createMetricCard("Efficiency");
   const responseTime = createMetricCard("Avg Response");
+  const ordnance = createMetricCard("Ordnance");
   const cards = [
     cityProtection,
     cityIntegrity,
     enemyNeutralized,
     resourceEfficiency,
     responseTime,
+    ordnance,
   ];
 
   for (const card of cards) {
@@ -254,8 +268,12 @@ export function createMetricsHud(container: HTMLElement): HudApi {
       metrics.averageResponseTicks === null
         ? "--"
         : `${metrics.averageResponseTicks.toFixed(1)}t`;
-    responseTime.detail.textContent = `${metrics.activeReinforcementCount} reinforcements`;
+    responseTime.detail.textContent = `${metrics.activeReinforcementCount} reinf, ${metrics.activeReloadCount} reload`;
     applyTone(responseTime, getResponseTone(metrics.averageResponseTicks));
+
+    ordnance.value.textContent = `${metrics.resourceOrdnanceRemaining}`;
+    ordnance.detail.textContent = `L:${metrics.ordnanceLaunched} I:${metrics.ordnanceIntercepted} R:${metrics.enemyReloadDecisionCount} C:${metrics.enemyCoverDecisionCount}`;
+    applyTone(ordnance, getOrdnanceTone(metrics));
   }
 
   return { update };

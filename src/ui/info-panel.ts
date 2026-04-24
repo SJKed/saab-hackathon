@@ -200,8 +200,18 @@ function createEmptyState(text: string): HTMLDivElement {
 }
 
 function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
-  const missionTone = assignment.mission === "intercept" ? mediumTone : lowTone;
-  const missionLabel = assignment.mission === "intercept" ? "Intercept" : "Reinforce";
+  const missionTone =
+    assignment.mission === "intercept"
+      ? mediumTone
+      : assignment.mission === "reload"
+        ? highTone
+        : lowTone;
+  const missionLabel =
+    assignment.mission === "intercept"
+      ? "Intercept"
+      : assignment.mission === "reload"
+        ? "Reload"
+        : "Reinforce";
   const threatTone = getThreatTone(assignment.threatScore);
   const priorityTone = getPriorityTone(assignment.priorityScore);
 

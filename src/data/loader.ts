@@ -79,6 +79,8 @@ const resourcePlans: ResourcePlan[] = [
   { type: "drone", label: "Drone Wing" },
   { type: "robot", label: "Ground Robot Unit" },
 ];
+const cityDefaultOrdnance = 700;
+const baseDefaultOrdnance = 900;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -233,6 +235,11 @@ function normalizeAlliedCity(
     attack: 42,
     defense: 56,
     health: 260,
+    ordnance: cityDefaultOrdnance,
+    maxOrdnance: cityDefaultOrdnance,
+    ordnanceRange: 170,
+    ordnanceSpeed: 320,
+    interceptChance: 0.25,
   };
 }
 
@@ -248,7 +255,16 @@ function normalizeAlliedSpawnZone(
     attack: 34,
     defense: 48,
     health: 210,
+    ordnance: baseDefaultOrdnance,
+    maxOrdnance: baseDefaultOrdnance,
+    ordnanceRange: 190,
+    ordnanceSpeed: 360,
+    interceptChance: 0.3,
   };
+}
+
+function getInitialResourceOrdnance(index: number): number {
+  return 5 + (index % 4);
 }
 
 function getResourceSpeed(type: ResourceType): number {
@@ -270,6 +286,7 @@ function createResourceFromSpawnZone(
     plan.type === "air-defense" ? 46 : plan.type === "drone" ? 28 : 40;
   const health =
     plan.type === "air-defense" ? 125 : plan.type === "drone" ? 78 : 112;
+  const maxOrdnance = getInitialResourceOrdnance(index);
 
   return {
     id: `R${index + 1}`,
@@ -285,6 +302,15 @@ function createResourceFromSpawnZone(
     attack,
     defense,
     health,
+    ordnance: maxOrdnance,
+    maxOrdnance,
+    ordnanceRange:
+      plan.type === "air-defense" ? 230 : plan.type === "drone" ? 150 : 120,
+    ordnanceSpeed:
+      plan.type === "air-defense" ? 440 : plan.type === "drone" ? 380 : 300,
+    interceptChance:
+      plan.type === "air-defense" ? 0.42 : plan.type === "drone" ? 0.3 : 0.2,
+    reloadTargetBaseId: undefined,
   };
 }
 
@@ -300,6 +326,11 @@ function normalizeSpawnZone(
     attack: 39,
     defense: 52,
     health: 240,
+    ordnance: baseDefaultOrdnance,
+    maxOrdnance: baseDefaultOrdnance,
+    ordnanceRange: 190,
+    ordnanceSpeed: 360,
+    interceptChance: 0.3,
   };
 }
 

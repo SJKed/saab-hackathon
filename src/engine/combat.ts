@@ -3,15 +3,22 @@ import type {
   AlliedSpawnZone,
   Enemy,
   EnemyBase,
+  OrdnanceOwnerCategory,
+  OrdnanceProjectile,
   Resource,
 } from "../models/entity";
 
 type UnitWithCombat = {
   id: string;
   name?: string;
+  position: { x: number; y: number };
   attack: number;
   defense: number;
   health: number;
+  ordnance: number;
+  ordnanceRange: number;
+  ordnanceSpeed: number;
+  interceptChance: number;
 };
 
 export type CombatUnitCategory =
@@ -30,7 +37,7 @@ export type CombatUnitReference = {
 export type CombatLogEvent = {
   id: string;
   tick: number;
-  kind: "engagement" | "destroyed";
+  kind: "engagement" | "destroyed" | "ordnance-launched";
   message: string;
   source?: CombatUnitReference;
   target?: CombatUnitReference;
@@ -45,6 +52,7 @@ export type CombatResolutionInput = {
   enemyBases: EnemyBase[];
   enemies: Enemy[];
   resources: Resource[];
+  projectiles: OrdnanceProjectile[];
   tick: number;
 };
 
@@ -54,11 +62,11 @@ export type CombatResolutionResult = {
   enemyBases: EnemyBase[];
   enemies: Enemy[];
   resources: Resource[];
+  projectiles: OrdnanceProjectile[];
   events: CombatLogEvent[];
 };
-
-const resourceEngagementRadius = 12;
-const baseEngagementRadius = 20;
+const cityEngagementRadius = 170;
+const baseEngagementRadius = 190;
 
 function distanceBetween(
   a: { x: number; y: number },
@@ -67,26 +75,6 @@ function distanceBetween(
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function calculateDamage(attacker: UnitWithCombat, defender: UnitWithCombat): number {
-  const normalizedDefense = Math.max(1, defender.defense);
-  return ((attacker.attack * (attacker.attack / normalizedDefense)) / 50) + 2;
-}
-
-function applyMutualDamage(attacker: UnitWithCombat, defender: UnitWithCombat): {
-  inflictedToDefender: number;
-  inflictedToAttacker: number;
-} {
-  const inflictedToDefender = calculateDamage(attacker, defender);
-  const inflictedToAttacker = calculateDamage(defender, attacker);
-
-  attacker.health = Math.max(0, attacker.health - inflictedToAttacker);
-  defender.health = Math.max(0, defender.health - inflictedToDefender);
-
-  return {
-    inflictedToDefender,
-    inflictedToAttacker,
-  };
-}
 
 function getUnitName(unit: { id: string; name?: string }): string {
   return unit.name ?? unit.id;
@@ -109,18 +97,18 @@ function createExchangeEvent(
   sourceCategory: CombatUnitCategory,
   target: UnitWithCombat,
   targetCategory: CombatUnitCategory,
-  inflictedToTarget: number,
-  inflictedToSource: number,
+  inflictedToTarget: number = 0,
+  inflictedToSource: number = 0,
 ): CombatLogEvent {
   return {
     id: `${tick}-engage-${source.id}-${target.id}`,
     tick,
-    kind: "engagement",
+    kind: "ordnance-launched",
     source: getUnitReference(source, sourceCategory),
     target: getUnitReference(target, targetCategory),
     inflictedToTarget,
     inflictedToSource,
-    message: `${getUnitName(source)} engaged ${getUnitName(target)}. ${getUnitName(source)} dealt ${inflictedToTarget.toFixed(2)} and received ${inflictedToSource.toFixed(2)} damage.`,
+    message: `${getUnitName(source)} launched ordnance at ${getUnitName(target)}.`,
   };
 }
 
@@ -136,32 +124,6 @@ function createDestroyedEvent(
     destroyedUnit: getUnitReference(unit, category),
     message: `${getUnitName(unit)} was destroyed.`,
   };
-}
-
-function syncActiveEngagements(resources: Resource[], enemies: Enemy[]): void {
-  const liveEnemyIds = new Set(enemies.filter((enemy) => enemy.health > 0).map((enemy) => enemy.id));
-  const liveResourceIds = new Set(
-    resources.filter((resource) => resource.health > 0).map((resource) => resource.id),
-  );
-
-  for (const resource of resources) {
-    if (resource.engagedWithId && !liveEnemyIds.has(resource.engagedWithId)) {
-      resource.engagedWithId = undefined;
-    }
-  }
-
-  for (const enemy of enemies) {
-    if (enemy.engagedWithId && !liveResourceIds.has(enemy.engagedWithId)) {
-      enemy.engagedWithId = undefined;
-    }
-  }
-}
-
-function setResourceEngagement(resource: Resource, enemy: Enemy): void {
-  resource.engagedWithId = enemy.id;
-  enemy.engagedWithId = resource.id;
-  resource.velocity = { x: 0, y: 0 };
-  enemy.velocity = { x: 0, y: 0 };
 }
 
 function findClosestCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefined {
@@ -186,19 +148,98 @@ function findClosestCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undef
   return closest;
 }
 
+function launchProjectile(
+  tick: number,
+  shooter: UnitWithCombat,
+  shooterCategory: OrdnanceOwnerCategory,
+  target: UnitWithCombat,
+  targetCategory: OrdnanceOwnerCategory,
+  projectiles: OrdnanceProjectile[],
+  events: CombatLogEvent[],
+): void {
+  // #region agent log
+  fetch("http://127.0.0.1:7927/ingest/66535b8d-fe12-47cb-8927-8d573246bf36", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "2bbcd1" },
+    body: JSON.stringify({
+      sessionId: "2bbcd1",
+      runId: "pre-fix",
+      hypothesisId: "H2",
+      location: "src/engine/combat.ts:160",
+      message: "launchProjectile input snapshot",
+      data: {
+        shooterId: shooter.id,
+        shooterCategory,
+        targetId: target.id,
+        shooterHasPosition: Boolean(shooter.position),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  if (shooter.ordnance <= 0) {
+    return;
+  }
+  const dx = target.position.x - shooter.position.x;
+  const dy = target.position.y - shooter.position.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance > shooter.ordnanceRange || distance <= 0.001) {
+    return;
+  }
+  shooter.ordnance = Math.max(0, shooter.ordnance - 1);
+  const vx = (dx / distance) * shooter.ordnanceSpeed;
+  const vy = (dy / distance) * shooter.ordnanceSpeed;
+  const projectile: OrdnanceProjectile = {
+    id: `${tick}-${shooter.id}-${target.id}-${projectiles.length + 1}`,
+    ownerId: shooter.id,
+    ownerCategory: shooterCategory,
+    targetId: target.id,
+    targetCategory,
+    position: { ...shooter.position },
+    velocity: { x: vx, y: vy },
+    speed: shooter.ordnanceSpeed,
+    attack: shooter.attack,
+    remainingRange: shooter.ordnanceRange,
+    maxRange: shooter.ordnanceRange,
+    interceptChance: shooter.interceptChance,
+    alive: true,
+  };
+  projectiles.push(projectile);
+  events.push(createExchangeEvent(tick, shooter, shooterCategory, target, targetCategory));
+}
+
 export function resolveCombat(input: CombatResolutionInput): CombatResolutionResult {
+  // #region agent log
+  fetch("http://127.0.0.1:7927/ingest/66535b8d-fe12-47cb-8927-8d573246bf36", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "2bbcd1" },
+    body: JSON.stringify({
+      sessionId: "2bbcd1",
+      runId: "pre-fix",
+      hypothesisId: "H1",
+      location: "src/engine/combat.ts:191",
+      message: "resolveCombat entry",
+      data: {
+        cities: input.alliedCities.length,
+        bases: input.alliedSpawnZones.length + input.enemyBases.length,
+        enemies: input.enemies.length,
+        resources: input.resources.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   const alliedCities = input.alliedCities.map((city) => ({ ...city }));
   const alliedSpawnZones = input.alliedSpawnZones.map((spawnZone) => ({ ...spawnZone }));
   const enemyBases = input.enemyBases.map((base) => ({ ...base }));
   const enemies = input.enemies.map((enemy) => ({ ...enemy }));
   const resources = input.resources.map((resource) => ({ ...resource }));
+  const projectiles = input.projectiles.map((projectile) => ({ ...projectile }));
   const events: CombatLogEvent[] = [];
-
-  syncActiveEngagements(resources, enemies);
 
   for (let resourceIndex = 0; resourceIndex < resources.length; resourceIndex += 1) {
     const resource = resources[resourceIndex];
-    if (resource.health <= 0) {
+    if (resource.health <= 0 || resource.ordnance <= 0) {
       continue;
     }
 
@@ -208,48 +249,11 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
         continue;
       }
 
-      if (resource.engagedWithId && resource.engagedWithId !== enemy.id) {
-        continue;
-      }
-
-      if (enemy.engagedWithId && enemy.engagedWithId !== resource.id) {
-        continue;
-      }
-
       const distance = distanceBetween(resource.position, enemy.position);
-      const isPersistentEngagement =
-        resource.engagedWithId === enemy.id && enemy.engagedWithId === resource.id;
-      if (!isPersistentEngagement && distance > resourceEngagementRadius) {
+      if (distance > resource.ordnanceRange) {
         continue;
       }
-
-      setResourceEngagement(resource, enemy);
-
-      const { inflictedToDefender, inflictedToAttacker } = applyMutualDamage(resource, enemy);
-      events.push(
-        createExchangeEvent(
-          input.tick,
-          resource,
-          "resource",
-          enemy,
-          "enemy",
-          inflictedToDefender,
-          inflictedToAttacker,
-        ),
-      );
-
-      if (enemy.health <= 0) {
-        resource.engagedWithId = undefined;
-        enemy.engagedWithId = undefined;
-        events.push(createDestroyedEvent(input.tick, enemy, "enemy"));
-      }
-
-      if (resource.health <= 0) {
-        resource.engagedWithId = undefined;
-        enemy.engagedWithId = undefined;
-        events.push(createDestroyedEvent(input.tick, resource, "resource"));
-      }
-
+      launchProjectile(input.tick, resource, "resource", enemy, "enemy", projectiles, events);
       break;
     }
   }
@@ -260,50 +264,51 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
-    if (enemy.engagedWithId) {
-      continue;
-    }
-
     const targetCity = findClosestCity(enemy, alliedCities);
     if (!targetCity) {
       continue;
     }
 
     const cityDistance = distanceBetween(enemy.position, targetCity.position);
-    if (cityDistance > baseEngagementRadius) {
+    if (cityDistance > cityEngagementRadius) {
+      continue;
+    }
+    launchProjectile(input.tick, enemy, "enemy", targetCity, "allied-city", projectiles, events);
+  }
+
+  for (let baseIndex = 0; baseIndex < alliedSpawnZones.length; baseIndex += 1) {
+    const alliedBase = alliedSpawnZones[baseIndex];
+    if (alliedBase.health <= 0 || alliedBase.ordnance <= 0) {
       continue;
     }
 
-    const { inflictedToDefender, inflictedToAttacker } = applyMutualDamage(enemy, targetCity);
-    events.push(
-      createExchangeEvent(
+    for (let enemyIndex = 0; enemyIndex < enemies.length; enemyIndex += 1) {
+      const enemy = enemies[enemyIndex];
+      if (enemy.health <= 0) {
+        continue;
+      }
+
+      const distance = distanceBetween(enemy.position, alliedBase.position);
+      if (distance > baseEngagementRadius) {
+        continue;
+      }
+
+      launchProjectile(
         input.tick,
+        alliedBase,
+        "allied-spawn-zone",
         enemy,
         "enemy",
-        targetCity,
-        "allied-city",
-        inflictedToDefender,
-        inflictedToAttacker,
-      ),
-    );
-
-    if (targetCity.health <= 0) {
-      events.push(createDestroyedEvent(input.tick, targetCity, "allied-city"));
-    }
-
-    if (enemy.health <= 0) {
-      events.push(createDestroyedEvent(input.tick, enemy, "enemy"));
-      continue;
+        projectiles,
+        events,
+      );
+      break;
     }
   }
 
   for (let resourceIndex = 0; resourceIndex < resources.length; resourceIndex += 1) {
     const resource = resources[resourceIndex];
-    if (resource.health <= 0) {
-      continue;
-    }
-
-    if (resource.engagedWithId != null) {
+    if (resource.health <= 0 || resource.ordnance <= 0) {
       continue;
     }
 
@@ -318,28 +323,57 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
         continue;
       }
 
-      const { inflictedToDefender, inflictedToAttacker } = applyMutualDamage(resource, enemyBase);
-      events.push(
-        createExchangeEvent(
-          input.tick,
-          resource,
-          "resource",
-          enemyBase,
-          "enemy-base",
-          inflictedToDefender,
-          inflictedToAttacker,
-        ),
+      launchProjectile(
+        input.tick,
+        resource,
+        "resource",
+        enemyBase,
+        "enemy-base",
+        projectiles,
+        events,
       );
-
-      if (enemyBase.health <= 0) {
-        events.push(createDestroyedEvent(input.tick, enemyBase, "enemy-base"));
-      }
-
-      if (resource.health <= 0) {
-        events.push(createDestroyedEvent(input.tick, resource, "resource"));
-      }
-
       break;
+    }
+  }
+
+  for (const city of alliedCities) {
+    if (city.health <= 0 || city.ordnance <= 0) {
+      continue;
+    }
+    const target = enemies.find(
+      (enemy) =>
+        enemy.health > 0 && distanceBetween(city.position, enemy.position) <= city.ordnanceRange,
+    );
+    if (target) {
+      launchProjectile(input.tick, city, "allied-city", target, "enemy", projectiles, events);
+    }
+  }
+
+  for (const enemyBase of enemyBases) {
+    if (enemyBase.health <= 0 || enemyBase.ordnance <= 0) {
+      continue;
+    }
+    const target = resources.find(
+      (resource) =>
+        resource.health > 0 &&
+        distanceBetween(enemyBase.position, resource.position) <= enemyBase.ordnanceRange,
+    );
+    if (target) {
+      launchProjectile(
+        input.tick,
+        enemyBase,
+        "enemy-base",
+        target,
+        "resource",
+        projectiles,
+        events,
+      );
+    }
+  }
+
+  for (const unit of [...alliedCities, ...alliedSpawnZones, ...enemyBases, ...enemies, ...resources]) {
+    if (unit.health <= 0) {
+      events.push(createDestroyedEvent(input.tick, unit, "resource"));
     }
   }
 
@@ -349,6 +383,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
     enemyBases: enemyBases.filter((base) => base.health > 0),
     enemies: enemies.filter((enemy) => enemy.health > 0),
     resources: resources.filter((resource) => resource.health > 0),
+    projectiles: projectiles.filter((projectile) => projectile.alive),
     events,
   };
 }

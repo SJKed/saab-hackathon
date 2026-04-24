@@ -3,6 +3,7 @@ import type {
   AlliedSpawnZone,
   Enemy,
   EnemyBase,
+  OrdnanceProjectile,
   Resource,
 } from "../models/entity";
 import type { NormalizedMapData } from "../data/loader";
@@ -16,6 +17,7 @@ type EntityRenderData = {
   enemies: Enemy[];
   resources: Resource[];
   assignments: ResourceAssignment[];
+  projectiles: OrdnanceProjectile[];
   terrain: NormalizedMapData["terrain"];
   hoverPoint: { x: number; y: number } | null;
 };
@@ -30,6 +32,8 @@ const assignmentColor = "rgba(76, 201, 240, 0.7)";
 const interceptAssignmentColor = "rgba(255, 183, 3, 0.78)";
 const alliedDeploymentLineColor = "rgba(76, 201, 240, 0.36)";
 const enemyDeploymentLineColor = "rgba(255, 107, 107, 0.45)";
+const projectileAlliedColor = "rgba(76, 201, 240, 0.9)";
+const projectileEnemyColor = "rgba(255, 107, 107, 0.92)";
 const hoverPointRadius = 18;
 const airplaneIcon = createIcon(new URL("../../assets/airplane.png", import.meta.url).href);
 const droneIcon = createIcon(new URL("../../assets/drone.png", import.meta.url).href);
@@ -154,6 +158,9 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Threat: ${city.threat.toFixed(4)}`,
           `Priority Value: ${city.value.toFixed(1)}`,
           `ATK/DEF/HP: ${city.attack}/${city.defense}/${city.health.toFixed(1)}`,
+          `Ordnance: ${city.ordnance}/${city.maxOrdnance}`,
+          `Ordnance Range: ${city.ordnanceRange.toFixed(0)}`,
+          `Intercept Chance: ${(city.interceptChance * 100).toFixed(0)}%`,
           `Position: (${Math.round(city.position.x)}, ${Math.round(city.position.y)})`,
         ],
       });
@@ -175,6 +182,9 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `ID: ${spawnZone.id}`,
           `Deployed Resources: ${deployedCount}`,
           `ATK/DEF/HP: ${spawnZone.attack}/${spawnZone.defense}/${spawnZone.health.toFixed(1)}`,
+          `Ordnance: ${spawnZone.ordnance}/${spawnZone.maxOrdnance}`,
+          `Ordnance Range: ${spawnZone.ordnanceRange.toFixed(0)}`,
+          `Intercept Chance: ${(spawnZone.interceptChance * 100).toFixed(0)}%`,
           `Position: (${Math.round(spawnZone.position.x)}, ${Math.round(spawnZone.position.y)})`,
         ],
       });
@@ -188,7 +198,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
         (item) => item.resourceId === resource.id,
       );
       const missionStatus = assignment
-        ? `${assignment.mission === "intercept" ? "Intercepting" : "Reinforcing"} ${assignment.targetName}`
+        ? `${assignment.mission === "intercept" ? "Intercepting" : assignment.mission === "reload" ? "Reloading at" : "Reinforcing"} ${assignment.targetName}`
         : "Available";
 
       items.push({
@@ -201,6 +211,9 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Speed: ${resource.speed.toFixed(1)}`,
           `Range: ${resource.range.toFixed(1)}`,
           `ATK/DEF/HP: ${resource.attack}/${resource.defense}/${resource.health.toFixed(1)}`,
+          `Ordnance: ${resource.ordnance}/${resource.maxOrdnance}`,
+          `Ordnance Range: ${resource.ordnanceRange.toFixed(0)}`,
+          `Intercept Chance: ${(resource.interceptChance * 100).toFixed(0)}%`,
           `Status: ${missionStatus}`,
           `Position: (${Math.round(resource.position.x)}, ${Math.round(resource.position.y)})`,
         ],
@@ -223,6 +236,9 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `ID: ${enemyBase.id}`,
           `Deployed Resources: ${deployedCount}`,
           `ATK/DEF/HP: ${enemyBase.attack}/${enemyBase.defense}/${enemyBase.health.toFixed(1)}`,
+          `Ordnance: ${enemyBase.ordnance}/${enemyBase.maxOrdnance}`,
+          `Ordnance Range: ${enemyBase.ordnanceRange.toFixed(0)}`,
+          `Intercept Chance: ${(enemyBase.interceptChance * 100).toFixed(0)}%`,
           `Position: (${Math.round(enemyBase.position.x)}, ${Math.round(enemyBase.position.y)})`,
         ],
       });
@@ -242,6 +258,9 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Threat Level: ${enemy.threatLevel.toFixed(2)}`,
           `Target: ${enemy.targetId ?? "Unassigned"}`,
           `ATK/DEF/HP: ${enemy.attack}/${enemy.defense}/${enemy.health.toFixed(1)}`,
+          `Ordnance: ${enemy.ordnance}/${enemy.maxOrdnance}`,
+          `Ordnance Range: ${enemy.ordnanceRange.toFixed(0)}`,
+          `Intercept Chance: ${(enemy.interceptChance * 100).toFixed(0)}%`,
           `Position: (${Math.round(enemy.position.x)}, ${Math.round(enemy.position.y)})`,
         ],
       });
@@ -629,6 +648,34 @@ function getAssignmentTarget(
   return cities.find((city) => city.id === assignment.targetId)?.position;
 }
 
+function drawProjectiles(
+  ctx: CanvasRenderingContext2D,
+  projectiles: OrdnanceProjectile[],
+): void {
+  for (const projectile of projectiles) {
+    if (!projectile.alive) {
+      continue;
+    }
+    const isAlliedProjectile =
+      projectile.ownerCategory === "allied-city" ||
+      projectile.ownerCategory === "allied-spawn-zone" ||
+      projectile.ownerCategory === "resource";
+    ctx.fillStyle = isAlliedProjectile ? projectileAlliedColor : projectileEnemyColor;
+    ctx.beginPath();
+    ctx.arc(projectile.position.x, projectile.position.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = ctx.fillStyle;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(projectile.position.x, projectile.position.y);
+    ctx.lineTo(
+      projectile.position.x - projectile.velocity.x * 0.03,
+      projectile.position.y - projectile.velocity.y * 0.03,
+    );
+    ctx.stroke();
+  }
+}
+
 function drawAssignments(
   ctx: CanvasRenderingContext2D,
   assignments: ResourceAssignment[],
@@ -776,6 +823,7 @@ export function renderEntities(ctx: CanvasRenderingContext2D, data: EntityRender
   for (const resource of data.resources) {
     drawResource(ctx, resource);
   }
+  drawProjectiles(ctx, data.projectiles);
 
   drawTooltip(ctx, data);
 }

@@ -13,6 +13,14 @@ export interface CombatStats {
   health: number;
 }
 
+export interface OrdnanceCapabilities {
+  ordnance: number;
+  maxOrdnance: number;
+  ordnanceRange: number;
+  ordnanceSpeed: number;
+  interceptChance: number;
+}
+
 export interface AlliedCity extends CombatStats {
   id: string;
   name?: string;
@@ -20,18 +28,21 @@ export interface AlliedCity extends CombatStats {
   value: number;
   threat: number;
 }
+export interface AlliedCity extends OrdnanceCapabilities {}
 
 export interface AlliedSpawnZone extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
 }
+export interface AlliedSpawnZone extends OrdnanceCapabilities {}
 
 export interface EnemyBase extends CombatStats {
   id: string;
   name?: string;
   position: Vector;
 }
+export interface EnemyBase extends OrdnanceCapabilities {}
 
 export interface Enemy extends CombatStats {
   id: string;
@@ -44,7 +55,9 @@ export interface Enemy extends CombatStats {
   threatLevel: number;
   originBaseId?: string;
   targetId?: string;
+  behaviorState?: "attack" | "cover" | "reload" | "reload-complete";
 }
+export interface Enemy extends OrdnanceCapabilities {}
 
 export interface Resource extends CombatStats {
   id: string;
@@ -58,6 +71,31 @@ export interface Resource extends CombatStats {
   cooldown: number;
   available: boolean;
   originSpawnZoneId?: string;
+  reloadTargetBaseId?: string;
+}
+export interface Resource extends OrdnanceCapabilities {}
+
+export type OrdnanceOwnerCategory =
+  | "allied-city"
+  | "allied-spawn-zone"
+  | "enemy-base"
+  | "enemy"
+  | "resource";
+
+export interface OrdnanceProjectile {
+  id: string;
+  ownerId: string;
+  ownerCategory: OrdnanceOwnerCategory;
+  targetId: string;
+  targetCategory: OrdnanceOwnerCategory;
+  position: Vector;
+  velocity: Vector;
+  speed: number;
+  attack: number;
+  remainingRange: number;
+  maxRange: number;
+  interceptChance: number;
+  alive: boolean;
 }
 
 // Type aliases are useful when importing a "model" naming style elsewhere.
@@ -78,6 +116,11 @@ export const mockAlliedCities: AlliedCity[] = [
     attack: 42,
     defense: 56,
     health: 260,
+    ordnance: 500,
+    maxOrdnance: 500,
+    ordnanceRange: 160,
+    ordnanceSpeed: 320,
+    interceptChance: 0.24,
   },
   {
     id: "B2",
@@ -87,6 +130,11 @@ export const mockAlliedCities: AlliedCity[] = [
     attack: 42,
     defense: 56,
     health: 260,
+    ordnance: 500,
+    maxOrdnance: 500,
+    ordnanceRange: 160,
+    ordnanceSpeed: 320,
+    interceptChance: 0.24,
   },
 ];
 
@@ -104,6 +152,11 @@ export const mockEnemies: Enemy[] = [
     attack: 58,
     defense: 40,
     health: 118,
+    ordnance: 14,
+    maxOrdnance: 14,
+    ordnanceRange: 150,
+    ordnanceSpeed: 340,
+    interceptChance: 0.2,
   },
   {
     id: "E2",
@@ -118,6 +171,11 @@ export const mockEnemies: Enemy[] = [
     attack: 36,
     defense: 30,
     health: 82,
+    ordnance: 12,
+    maxOrdnance: 12,
+    ordnanceRange: 130,
+    ordnanceSpeed: 300,
+    interceptChance: 0.26,
   },
 ];
 
@@ -136,6 +194,12 @@ export const mockResources: Resource[] = [
     attack: 38,
     defense: 28,
     health: 78,
+    ordnance: 6,
+    maxOrdnance: 6,
+    ordnanceRange: 140,
+    ordnanceSpeed: 360,
+    interceptChance: 0.32,
+    reloadTargetBaseId: undefined,
   },
   {
     id: "R2",
@@ -151,6 +215,12 @@ export const mockResources: Resource[] = [
     attack: 52,
     defense: 46,
     health: 125,
+    ordnance: 7,
+    maxOrdnance: 7,
+    ordnanceRange: 220,
+    ordnanceSpeed: 420,
+    interceptChance: 0.42,
+    reloadTargetBaseId: undefined,
   },
   {
     id: "R3",
@@ -166,5 +236,11 @@ export const mockResources: Resource[] = [
     attack: 44,
     defense: 40,
     health: 112,
+    ordnance: 5,
+    maxOrdnance: 5,
+    ordnanceRange: 120,
+    ordnanceSpeed: 260,
+    interceptChance: 0.2,
+    reloadTargetBaseId: undefined,
   },
 ];

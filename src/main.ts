@@ -3,6 +3,7 @@ import { allocateResources } from "./engine/allocation";
 import type { ResourceAssignment } from "./engine/allocation";
 import { resolveCombat } from "./engine/combat";
 import type { CombatLogEvent } from "./engine/combat";
+import type { OrdnanceProjectile } from "./models/entity";
 import {
   createMetricsState,
   getMetricsSnapshot,
@@ -15,6 +16,7 @@ import {
   updateEnemyPositions,
   updateResourcePositions,
 } from "./simulation/updater";
+import { resolveOrdnance } from "./simulation/ordnance";
 import type { StrategyMode } from "./ui/controls";
 import { createControls } from "./ui/controls";
 import { createInfoPanel } from "./ui/info-panel";
@@ -68,6 +70,7 @@ let resources = mapData.resources.map((resource) => ({
   velocity: { ...resource.velocity },
 }));
 let enemies = createEnemyDeployments(enemyBases, alliedCities);
+let projectiles: OrdnanceProjectile[] = [];
 let assignments: ResourceAssignment[] = [];
 let eventLog: CombatLogEvent[] = [];
 let metricsState: MetricsState = createMetricsState(
@@ -76,6 +79,7 @@ let metricsState: MetricsState = createMetricsState(
   resources,
   0,
 );
+let lastEnemyBehaviorById: Record<string, string | undefined> = {};
 let hoverPoint: { x: number; y: number } | null = null;
 let lastFrameTimestamp = performance.now();
 let tickAccumulatorMs = 0;
@@ -116,11 +120,13 @@ function resetSimulationState(width: number, height: number): void {
     velocity: { ...resource.velocity },
   }));
   enemies = createEnemyDeployments(enemyBases, alliedCities);
+  projectiles = [];
   assignments = [];
   eventLog = [];
   tickAccumulatorMs = 0;
   simulationTick = 0;
   metricsState = createMetricsState(alliedCities, enemies, resources, simulationTick);
+  lastEnemyBehaviorById = {};
 }
 
 function resizeCanvas(): void {
@@ -169,27 +175,42 @@ function renderLoop(timestamp: number): void {
     const strategySpeedFactor = getStrategySpeedFactor(controlsState.strategy);
     enemies = updateEnemyPositions(
       enemies,
+      enemyBases,
       alliedCities,
+      resources,
       (simulationTickMs / 1000) * strategySpeedFactor,
     );
+    const behaviorEvents: CombatLogEvent[] = [];
+    for (const enemy of enemies) {
+      const previous = lastEnemyBehaviorById[enemy.id];
+      if (enemy.behaviorState && enemy.behaviorState !== previous) {
+        behaviorEvents.push({
+          id: `${simulationTick}-enemy-behavior-${enemy.id}-${enemy.behaviorState}`,
+          tick: simulationTick,
+          kind: "engagement",
+          message: `${enemy.name ?? enemy.id} switched to ${enemy.behaviorState}.`,
+        });
+      }
+      lastEnemyBehaviorById[enemy.id] = enemy.behaviorState;
+    }
 
     const resourcesForAllocation = resources.map((resource) => ({
       ...resource,
       available: resource.cooldown <= 0 && !resource.engagedWithId,
     }));
 
-    const allocationResult = allocateResources(alliedCities, resourcesForAllocation, enemies);
-    assignments = allocationResult.assignments;
-    metricsState = updateMetricsState(
-      metricsState,
+    const allocationResult = allocateResources(
+      alliedCities,
+      alliedSpawnZones,
+      resourcesForAllocation,
       enemies,
-      assignments,
-      simulationTick,
     );
+    assignments = allocationResult.assignments;
     resources = updateResourcePositions(
       allocationResult.resources,
       assignments,
       alliedCities,
+      alliedSpawnZones,
       enemies,
       (simulationTickMs / 1000) * strategySpeedFactor,
     );
@@ -200,16 +221,36 @@ function renderLoop(timestamp: number): void {
       enemyBases,
       enemies,
       resources,
+      projectiles,
       tick: simulationTick,
     });
+    const ordnanceResolution = resolveOrdnance({
+      alliedCities: combatResolution.alliedCities,
+      alliedSpawnZones: combatResolution.alliedSpawnZones,
+      enemyBases: combatResolution.enemyBases,
+      enemies: combatResolution.enemies,
+      resources: combatResolution.resources,
+      projectiles: combatResolution.projectiles,
+      tick: simulationTick,
+      deltaSeconds: (simulationTickMs / 1000) * strategySpeedFactor,
+    });
 
-    alliedCities = combatResolution.alliedCities;
-    alliedSpawnZones = combatResolution.alliedSpawnZones;
-    enemyBases = combatResolution.enemyBases;
-    enemies = combatResolution.enemies;
-    resources = combatResolution.resources;
-    if (combatResolution.events.length > 0) {
-      eventLog = [...combatResolution.events, ...eventLog].slice(0, 60);
+    alliedCities = ordnanceResolution.alliedCities;
+    alliedSpawnZones = ordnanceResolution.alliedSpawnZones;
+    enemyBases = ordnanceResolution.enemyBases;
+    enemies = ordnanceResolution.enemies;
+    resources = ordnanceResolution.resources;
+    projectiles = ordnanceResolution.projectiles;
+    metricsState = updateMetricsState(
+      metricsState,
+      enemies,
+      assignments,
+      simulationTick,
+      ordnanceResolution.stats,
+    );
+    const combinedEvents = [...behaviorEvents, ...combatResolution.events, ...ordnanceResolution.events];
+    if (combinedEvents.length > 0) {
+      eventLog = [...combinedEvents, ...eventLog].slice(0, 60);
     }
 
     alliedCities = calculateThreatsForCities(alliedCities, enemies);
@@ -225,6 +266,7 @@ function renderLoop(timestamp: number): void {
     enemies,
     resources,
     assignments,
+    projectiles,
     terrain: mapData.terrain,
     hoverPoint,
   });

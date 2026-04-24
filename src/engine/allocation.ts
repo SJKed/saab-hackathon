@@ -1,7 +1,7 @@
-import type { AlliedCity, Enemy, Resource } from "../models/entity";
+import type { AlliedCity, AlliedSpawnZone, Enemy, Resource } from "../models/entity";
 import { predictIntercept } from "./intercept";
 
-export type ResourceMission = "intercept" | "reinforce";
+export type ResourceMission = "intercept" | "reinforce" | "reload";
 
 export type ResourceAssignment = {
   mission: ResourceMission;
@@ -28,7 +28,7 @@ function distanceBetween(
 }
 
 function isResourceAvailable(resource: Resource): boolean {
-  return resource.available && resource.cooldown <= 0;
+  return resource.available && resource.cooldown <= 0 && resource.ordnance > 0;
 }
 
 function canIntercept(resource: Resource): boolean {
@@ -55,6 +55,7 @@ function getReinforcementPriority(city: AlliedCity): number {
 
 export function allocateResources(
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   resources: Resource[],
   enemies: Enemy[],
 ): AllocationResult {
@@ -63,6 +64,36 @@ export function allocateResources(
   const sortedEnemies = [...enemies].sort(
     (a, b) => getInterceptPriority(b, cities) - getInterceptPriority(a, cities),
   );
+
+  for (let i = 0; i < mutableResources.length; i += 1) {
+    const resource = mutableResources[i];
+    if (resource.ordnance > 0) {
+      continue;
+    }
+
+    const reloadBase = alliedSpawnZones.find((base) => base.id === resource.originSpawnZoneId);
+    if (!reloadBase) {
+      continue;
+    }
+
+    mutableResources[i] = {
+      ...resource,
+      available: false,
+      reloadTargetBaseId: reloadBase.id,
+    };
+
+    assignments.push({
+      mission: "reload",
+      targetId: reloadBase.id,
+      targetName: reloadBase.name ?? reloadBase.id,
+      resourceId: resource.id,
+      resourceName: resource.name ?? resource.id,
+      distance: distanceBetween(resource.position, reloadBase.position),
+      threatScore: 0,
+      priorityScore: 999,
+      reason: "Asset is out of ordnance and is explicitly routed to a base for reloading.",
+    });
+  }
 
   for (const enemy of sortedEnemies) {
     const priorityScore = getInterceptPriority(enemy, cities);
