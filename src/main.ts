@@ -4,6 +4,11 @@ import type { ResourceAssignment } from "./engine/allocation";
 import { resolveCombat } from "./engine/combat";
 import type { CombatLogEvent } from "./engine/combat";
 import {
+  coordinateEnemyDeployments,
+  createEnemyDirectorState,
+} from "./engine/enemy-director";
+import type { EnemyDirectorState } from "./engine/enemy-director";
+import {
   createMetricsState,
   getMetricsSnapshot,
   updateMetricsState,
@@ -15,11 +20,17 @@ import {
   updateEnemyPositions,
   updateResourcePositions,
 } from "./simulation/updater";
+import { clonePlatform } from "./models/platform-utils";
 import type { StrategyMode } from "./ui/controls";
 import { createControls } from "./ui/controls";
 import { createInfoPanel } from "./ui/info-panel";
 import { createMetricsHud } from "./ui/metrics-hud";
-import { drawTerrain, renderEntities } from "./ui/renderer";
+import {
+  drawTerrain,
+  mapCombatEventsToEffects,
+  renderEntities,
+} from "./ui/renderer";
+import type { CombatVisualEffect } from "./ui/renderer";
 
 const canvasElement = document.getElementById("simulation-canvas");
 const appElement = document.getElementById("app");
@@ -62,18 +73,16 @@ let enemyBases = mapData.enemyBases.map((enemyBase) => ({
   ...enemyBase,
   position: { ...enemyBase.position },
 }));
-let resources = mapData.resources.map((resource) => ({
-  ...resource,
-  position: { ...resource.position },
-  velocity: { ...resource.velocity },
-}));
-let enemies = createEnemyDeployments(enemyBases, alliedCities);
+let alliedPlatforms = mapData.alliedPlatforms.map(clonePlatform);
+let enemyPlatforms = createEnemyDeployments(enemyBases, alliedCities);
 let assignments: ResourceAssignment[] = [];
 let eventLog: CombatLogEvent[] = [];
+let combatEffects: CombatVisualEffect[] = [];
+let enemyDirectorState: EnemyDirectorState = createEnemyDirectorState(enemyBases);
 let metricsState: MetricsState = createMetricsState(
   alliedCities,
-  enemies,
-  resources,
+  enemyPlatforms,
+  alliedPlatforms,
   0,
 );
 let hoverPoint: { x: number; y: number } | null = null;
@@ -110,17 +119,20 @@ function resetSimulationState(width: number, height: number): void {
     ...enemyBase,
     position: { ...enemyBase.position },
   }));
-  resources = mapData.resources.map((resource) => ({
-    ...resource,
-    position: { ...resource.position },
-    velocity: { ...resource.velocity },
-  }));
-  enemies = createEnemyDeployments(enemyBases, alliedCities);
+  alliedPlatforms = mapData.alliedPlatforms.map(clonePlatform);
+  enemyPlatforms = createEnemyDeployments(enemyBases, alliedCities);
   assignments = [];
   eventLog = [];
+  combatEffects = [];
+  enemyDirectorState = createEnemyDirectorState(enemyBases);
   tickAccumulatorMs = 0;
   simulationTick = 0;
-  metricsState = createMetricsState(alliedCities, enemies, resources, simulationTick);
+  metricsState = createMetricsState(
+    alliedCities,
+    enemyPlatforms,
+    alliedPlatforms,
+    simulationTick,
+  );
 }
 
 function resizeCanvas(): void {
@@ -167,30 +179,41 @@ function renderLoop(timestamp: number): void {
   while (tickAccumulatorMs >= simulationTickMs) {
     simulationTick += 1;
     const strategySpeedFactor = getStrategySpeedFactor(controlsState.strategy);
-    enemies = updateEnemyPositions(
-      enemies,
+    const enemyDeploymentState = coordinateEnemyDeployments(
+      enemyDirectorState,
+      simulationTick,
       alliedCities,
+      alliedPlatforms,
+      enemyPlatforms,
+      enemyBases,
+    );
+    enemyDirectorState = enemyDeploymentState.directorState;
+    enemyPlatforms = enemyDeploymentState.enemyPlatforms;
+    enemyPlatforms = updateEnemyPositions(
+      enemyPlatforms,
+      alliedCities,
+      enemyBases,
       (simulationTickMs / 1000) * strategySpeedFactor,
     );
 
-    const resourcesForAllocation = resources.map((resource) => ({
-      ...resource,
-      available: resource.cooldown <= 0 && !resource.engagedWithId,
-    }));
-
-    const allocationResult = allocateResources(alliedCities, resourcesForAllocation, enemies);
+    const allocationResult = allocateResources(
+      alliedCities,
+      alliedPlatforms,
+      enemyPlatforms,
+    );
     assignments = allocationResult.assignments;
     metricsState = updateMetricsState(
       metricsState,
-      enemies,
+      enemyPlatforms,
       assignments,
       simulationTick,
     );
-    resources = updateResourcePositions(
-      allocationResult.resources,
+    alliedPlatforms = updateResourcePositions(
+      alliedPlatforms,
       assignments,
       alliedCities,
-      enemies,
+      enemyPlatforms,
+      alliedSpawnZones,
       (simulationTickMs / 1000) * strategySpeedFactor,
     );
 
@@ -198,39 +221,53 @@ function renderLoop(timestamp: number): void {
       alliedCities,
       alliedSpawnZones,
       enemyBases,
-      enemies,
-      resources,
+      alliedPlatforms,
+      enemyPlatforms,
       tick: simulationTick,
     });
 
     alliedCities = combatResolution.alliedCities;
     alliedSpawnZones = combatResolution.alliedSpawnZones;
     enemyBases = combatResolution.enemyBases;
-    enemies = combatResolution.enemies;
-    resources = combatResolution.resources;
+    alliedPlatforms = combatResolution.alliedPlatforms;
+    enemyPlatforms = combatResolution.enemyPlatforms;
     if (combatResolution.events.length > 0) {
+      combatEffects = [
+        ...combatEffects,
+        ...mapCombatEventsToEffects(combatResolution.events, performance.now()),
+      ];
       eventLog = [...combatResolution.events, ...eventLog].slice(0, 60);
     }
 
-    alliedCities = calculateThreatsForCities(alliedCities, enemies);
+    alliedCities = calculateThreatsForCities(alliedCities, enemyPlatforms);
     tickAccumulatorMs -= simulationTickMs;
   }
 
   drawTerrain(ctx, mapData);
   drawGrid();
+  combatEffects = combatEffects.filter(
+    (effect) => timestamp - effect.createdAtMs < effect.durationMs,
+  );
   renderEntities(ctx, {
     alliedCities,
     alliedSpawnZones,
     enemyBases,
-    enemies,
-    resources,
+    enemyPlatforms,
+    alliedPlatforms,
     assignments,
+    combatEffects,
     terrain: mapData.terrain,
     hoverPoint,
   });
-  infoPanel.update(assignments, eventLog);
+  infoPanel.update(assignments, eventLog, enemyDirectorState.snapshot);
   metricsHud.update(
-    getMetricsSnapshot(metricsState, alliedCities, enemies, resources, assignments),
+    getMetricsSnapshot(
+      metricsState,
+      alliedCities,
+      enemyPlatforms,
+      alliedPlatforms,
+      assignments,
+    ),
   );
   requestAnimationFrame(renderLoop);
 }

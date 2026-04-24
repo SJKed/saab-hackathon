@@ -1,0 +1,1 @@
+export const ENEMY_DEPLOYMENT_HOLD_SECONDS = 60 * 60;

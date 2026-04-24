@@ -1,10 +1,10 @@
 import mapJson from "../../assets/map.json";
+import { createAlliedPlatforms } from "./platform-factories";
 import type {
   AlliedCity,
   AlliedSpawnZone,
   EnemyBase,
-  Resource,
-  ResourceType,
+  MobilePlatform,
   Vector,
 } from "../models/entity";
 
@@ -17,11 +17,6 @@ type RawPoint = {
 
 type RawAlliedCity = RawPoint & {
   value: number;
-};
-
-type ResourcePlan = {
-  type: ResourceType;
-  label: string;
 };
 
 type RawTerrainZone = {
@@ -51,7 +46,7 @@ type RawMapData = {
 export type NormalizedMapData = {
   alliedCities: AlliedCity[];
   alliedSpawnZones: AlliedSpawnZone[];
-  resources: Resource[];
+  alliedPlatforms: MobilePlatform[];
   enemyBases: EnemyBase[];
   terrain: NormalizedTerrain;
 };
@@ -73,12 +68,6 @@ type CanvasSize = {
   width: number;
   height: number;
 };
-
-const resourcePlans: ResourcePlan[] = [
-  { type: "air-defense", label: "Air Defense" },
-  { type: "drone", label: "Drone Wing" },
-  { type: "robot", label: "Ground Robot Unit" },
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -230,9 +219,9 @@ function normalizeAlliedCity(
     position: normalizeVector(city, sourceSize, canvasSize),
     value: city.value,
     threat: 0,
-    attack: 42,
-    defense: 56,
+    maxHealth: 260,
     health: 260,
+    defenseRating: 0.22,
   };
 }
 
@@ -245,50 +234,13 @@ function normalizeAlliedSpawnZone(
     id: spawnZone.id,
     name: spawnZone.name,
     position: normalizeVector(spawnZone, sourceSize, canvasSize),
-    attack: 34,
-    defense: 48,
+    maxHealth: 210,
     health: 210,
+    defenseRating: 0.16,
   };
 }
 
-function getResourceSpeed(type: ResourceType): number {
-  return type === "drone" ? 3 : type === "air-defense" ? 2 : 1.5;
-}
-
-function getResourceRange(type: ResourceType): number {
-  return type === "air-defense" ? 220 : type === "drone" ? 150 : 120;
-}
-
-function createResourceFromSpawnZone(
-  spawnZone: AlliedSpawnZone,
-  index: number,
-): Resource {
-  const plan = resourcePlans[index % resourcePlans.length];
-  const attack =
-    plan.type === "air-defense" ? 52 : plan.type === "drone" ? 38 : 44;
-  const defense =
-    plan.type === "air-defense" ? 46 : plan.type === "drone" ? 28 : 40;
-  const health =
-    plan.type === "air-defense" ? 125 : plan.type === "drone" ? 78 : 112;
-
-  return {
-    id: `R${index + 1}`,
-    name: `${spawnZone.name ?? spawnZone.id} ${plan.label}`,
-    type: plan.type,
-    position: { ...spawnZone.position },
-    velocity: { x: 0, y: 0 },
-    speed: getResourceSpeed(plan.type),
-    range: getResourceRange(plan.type),
-    cooldown: 0,
-    available: true,
-    originSpawnZoneId: spawnZone.id,
-    attack,
-    defense,
-    health,
-  };
-}
-
-function normalizeSpawnZone(
+function normalizeEnemyBase(
   spawn: RawPoint,
   sourceSize: CanvasSize,
   canvasSize: CanvasSize,
@@ -297,9 +249,9 @@ function normalizeSpawnZone(
     id: spawn.id,
     name: spawn.name,
     position: normalizeVector(spawn, sourceSize, canvasSize),
-    attack: 39,
-    defense: 52,
+    maxHealth: 240,
     health: 240,
+    defenseRating: 0.18,
   };
 }
 
@@ -330,18 +282,19 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
     height: validatedMap.meta.height,
   };
 
+  const alliedCities = validatedMap.alliedCities.map((city) =>
+    normalizeAlliedCity(city, sourceSize, canvasSize),
+  );
+  const alliedSpawnZones = validatedMap.alliedSpawnZones.map((spawnZone) =>
+    normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize),
+  );
+
   return {
-    alliedCities: validatedMap.alliedCities.map((city) =>
-      normalizeAlliedCity(city, sourceSize, canvasSize),
-    ),
-    alliedSpawnZones: validatedMap.alliedSpawnZones.map((spawnZone) =>
-      normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize),
-    ),
-    resources: validatedMap.alliedSpawnZones
-      .map((spawnZone) => normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize))
-      .map(createResourceFromSpawnZone),
+    alliedCities,
+    alliedSpawnZones,
+    alliedPlatforms: createAlliedPlatforms(alliedSpawnZones),
     enemyBases: validatedMap.enemySpawnZones.map((spawn) =>
-      normalizeSpawnZone(spawn, sourceSize, canvasSize),
+      normalizeEnemyBase(spawn, sourceSize, canvasSize),
     ),
     terrain: {
       waterZones: validatedMap.terrain.waterZones.map((zone) =>

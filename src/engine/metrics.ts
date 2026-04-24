@@ -1,5 +1,6 @@
 import type { ResourceAssignment } from "./allocation";
-import type { AlliedCity, Enemy, Resource } from "../models/entity";
+import type { AlliedCity, MobilePlatform } from "../models/entity";
+import { isPlatformDeployed } from "../models/platform-utils";
 
 export type MetricsState = {
   initialCityCount: number;
@@ -47,32 +48,36 @@ function getAverage(values: number[]): number | null {
 
 export function createMetricsState(
   alliedCities: AlliedCity[],
-  enemies: Enemy[],
-  resources: Resource[],
-  tick: number,
+  enemyPlatforms: MobilePlatform[],
+  alliedPlatforms: MobilePlatform[],
+  _tick: number,
 ): MetricsState {
   return {
     initialCityCount: alliedCities.length,
     initialCityHealth: sumHealth(alliedCities),
-    initialEnemyCount: enemies.length,
-    initialResourceCount: resources.length,
-    enemyDeploymentTicks: Object.fromEntries(enemies.map((enemy) => [enemy.id, tick])),
+    initialEnemyCount: enemyPlatforms.length,
+    initialResourceCount: alliedPlatforms.length,
+    enemyDeploymentTicks: {},
     firstInterceptResponseTicks: {},
   };
 }
 
 export function updateMetricsState(
   state: MetricsState,
-  enemies: Enemy[],
+  enemyPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
   tick: number,
 ): MetricsState {
   const enemyDeploymentTicks = { ...state.enemyDeploymentTicks };
   const firstInterceptResponseTicks = { ...state.firstInterceptResponseTicks };
 
-  for (const enemy of enemies) {
-    if (enemyDeploymentTicks[enemy.id] === undefined) {
-      enemyDeploymentTicks[enemy.id] = tick;
+  for (const enemyPlatform of enemyPlatforms) {
+    if (!isPlatformDeployed(enemyPlatform)) {
+      continue;
+    }
+
+    if (enemyDeploymentTicks[enemyPlatform.id] === undefined) {
+      enemyDeploymentTicks[enemyPlatform.id] = tick;
     }
   }
 
@@ -103,12 +108,18 @@ export function updateMetricsState(
 export function getMetricsSnapshot(
   state: MetricsState,
   alliedCities: AlliedCity[],
-  enemies: Enemy[],
-  resources: Resource[],
+  enemyPlatforms: MobilePlatform[],
+  alliedPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
 ): MetricsSnapshot {
-  const enemyNeutralizedCount = Math.max(0, state.initialEnemyCount - enemies.length);
-  const resourceLossCount = Math.max(0, state.initialResourceCount - resources.length);
+  const enemyNeutralizedCount = Math.max(
+    0,
+    state.initialEnemyCount - enemyPlatforms.length,
+  );
+  const resourceLossCount = Math.max(
+    0,
+    state.initialResourceCount - alliedPlatforms.length,
+  );
   const activeInterceptCount = assignments.filter(
     (assignment) => assignment.mission === "intercept",
   ).length;

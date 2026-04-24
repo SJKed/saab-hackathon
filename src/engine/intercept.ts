@@ -1,4 +1,9 @@
-import type { AlliedCity, Enemy, Resource, Vector } from "../models/entity";
+import type { AlliedCity, MobilePlatform, Vector } from "../models/entity";
+import {
+  distanceBetween,
+  getPlatformTargetType,
+  platformCanSenseTarget,
+} from "../models/platform-utils";
 
 export type InterceptPrediction = {
   point: Vector;
@@ -6,21 +11,19 @@ export type InterceptPrediction = {
   timeToIntercept: number;
   enemyTimeToCity: number;
   feasibleBeforeImpact: boolean;
+  acquisitionFeasible: boolean;
 };
 
-export const resourceSpeedScale = 42;
-
-const minimumCityImpactDistance = 6;
-const interceptLeadBufferSeconds = 0.5;
+const minimumCityImpactDistance = 8;
+const interceptLeadBufferSeconds = 0.45;
 const epsilon = 0.000001;
 
-function distanceBetween(a: Vector, b: Vector): number {
-  return Math.hypot(b.x - a.x, b.y - a.y);
-}
-
-function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefined {
-  if (enemy.targetId) {
-    const matchedCity = cities.find((city) => city.id === enemy.targetId);
+function getTargetCity(
+  enemyPlatform: MobilePlatform,
+  cities: AlliedCity[],
+): AlliedCity | undefined {
+  if (enemyPlatform.targetId) {
+    const matchedCity = cities.find((city) => city.id === enemyPlatform.targetId);
     if (matchedCity) {
       return matchedCity;
     }
@@ -30,7 +33,7 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
   let nearestDistance = Number.POSITIVE_INFINITY;
 
   for (const city of cities) {
-    const distance = distanceBetween(enemy.position, city.position);
+    const distance = distanceBetween(enemyPlatform.position, city.position);
     if (distance < nearestDistance) {
       nearestDistance = distance;
       nearestCity = city;
@@ -40,22 +43,50 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
   return nearestCity;
 }
 
-function getEnemyTimeToCity(enemy: Enemy, cities: AlliedCity[]): number {
-  const targetCity = getTargetCity(enemy, cities);
+export function getPlatformTransitSpeed(platform: MobilePlatform): number {
+  const maneuverBonus =
+    platform.acceleration * 0.08 + platform.turnRate * 10;
+
+  return Math.min(platform.maxSpeed, platform.cruiseSpeed + maneuverBonus);
+}
+
+export function getSensorEnvelope(
+  platform: MobilePlatform,
+  target: MobilePlatform,
+): number {
+  const targetSignatureModifier = 0.82 + target.combat.signature * 0.42;
+  const trackingModifier = 0.9 + platform.sensors.trackingQuality * 0.28;
+
+  return (
+    platform.sensors.sensorRange *
+    targetSignatureModifier *
+    trackingModifier
+  );
+}
+
+function getEnemyTimeToCity(
+  enemyPlatform: MobilePlatform,
+  cities: AlliedCity[],
+): number {
+  const targetCity = getTargetCity(enemyPlatform, cities);
   if (!targetCity) {
     return Number.POSITIVE_INFINITY;
   }
 
   const remainingDistance = Math.max(
     0,
-    distanceBetween(enemy.position, targetCity.position) - minimumCityImpactDistance,
+    distanceBetween(enemyPlatform.position, targetCity.position) -
+      minimumCityImpactDistance,
   );
 
   if (remainingDistance <= 0) {
     return 0;
   }
 
-  const enemySpeed = Math.hypot(enemy.velocity.x, enemy.velocity.y);
+  const enemySpeed = Math.hypot(
+    enemyPlatform.velocity.x,
+    enemyPlatform.velocity.y,
+  );
   if (enemySpeed <= epsilon) {
     return Number.POSITIVE_INFINITY;
   }
@@ -63,18 +94,29 @@ function getEnemyTimeToCity(enemy: Enemy, cities: AlliedCity[]): number {
   return remainingDistance / enemySpeed;
 }
 
+function getManeuverDelaySeconds(platform: MobilePlatform): number {
+  const turnPenalty = Math.max(0, 0.9 - platform.turnRate) * 0.65;
+  const accelerationPenalty =
+    Math.max(0, 70 - platform.acceleration) / 85;
+
+  return 0.18 + turnPenalty + accelerationPenalty;
+}
+
 function solveInterceptTime(
-  resource: Resource,
-  enemy: Enemy,
-  resourceSpeed: number,
+  alliedPlatform: MobilePlatform,
+  enemyPlatform: MobilePlatform,
+  alliedSpeed: number,
 ): number | undefined {
-  const relativeX = enemy.position.x - resource.position.x;
-  const relativeY = enemy.position.y - resource.position.y;
+  const relativeX = enemyPlatform.position.x - alliedPlatform.position.x;
+  const relativeY = enemyPlatform.position.y - alliedPlatform.position.y;
   const enemyVelocitySquared =
-    enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y;
-  const resourceSpeedSquared = resourceSpeed * resourceSpeed;
-  const a = enemyVelocitySquared - resourceSpeedSquared;
-  const b = 2 * (relativeX * enemy.velocity.x + relativeY * enemy.velocity.y);
+    enemyPlatform.velocity.x * enemyPlatform.velocity.x +
+    enemyPlatform.velocity.y * enemyPlatform.velocity.y;
+  const alliedSpeedSquared = alliedSpeed * alliedSpeed;
+  const a = enemyVelocitySquared - alliedSpeedSquared;
+  const b =
+    2 *
+    (relativeX * enemyPlatform.velocity.x + relativeY * enemyPlatform.velocity.y);
   const c = relativeX * relativeX + relativeY * relativeY;
 
   if (Math.abs(a) <= epsilon) {
@@ -103,48 +145,61 @@ function solveInterceptTime(
   return Math.min(...positiveTimes);
 }
 
-export function getScaledResourceSpeed(resource: Resource): number {
-  return resource.speed * resourceSpeedScale;
-}
-
 export function predictIntercept(
-  resource: Resource,
-  enemy: Enemy,
+  alliedPlatform: MobilePlatform,
+  enemyPlatform: MobilePlatform,
   cities: AlliedCity[],
 ): InterceptPrediction | undefined {
-  const resourceSpeed = getScaledResourceSpeed(resource);
-  if (resourceSpeed <= epsilon) {
+  const alliedSpeed = getPlatformTransitSpeed(alliedPlatform);
+  if (alliedSpeed <= epsilon) {
     return undefined;
   }
 
-  const directDistance = distanceBetween(resource.position, enemy.position);
-  const enemyTimeToCity = getEnemyTimeToCity(enemy, cities);
-  const interceptTime = solveInterceptTime(resource, enemy, resourceSpeed);
+  const directDistance = distanceBetween(
+    alliedPlatform.position,
+    enemyPlatform.position,
+  );
+  const enemyTimeToCity = getEnemyTimeToCity(enemyPlatform, cities);
+  const rawInterceptTime = solveInterceptTime(
+    alliedPlatform,
+    enemyPlatform,
+    alliedSpeed,
+  );
+  const maneuverDelay = getManeuverDelaySeconds(alliedPlatform);
+  const targetType = getPlatformTargetType(enemyPlatform);
+  const acquisitionFeasible =
+    platformCanSenseTarget(alliedPlatform, targetType) &&
+    directDistance <= getSensorEnvelope(alliedPlatform, enemyPlatform) * 1.18;
 
-  if (interceptTime === undefined) {
+  if (rawInterceptTime === undefined) {
     const fallbackTime = Number.isFinite(enemyTimeToCity)
       ? Math.max(0, enemyTimeToCity - interceptLeadBufferSeconds)
       : 0;
     const fallbackPoint = {
-      x: enemy.position.x + enemy.velocity.x * fallbackTime,
-      y: enemy.position.y + enemy.velocity.y * fallbackTime,
+      x: enemyPlatform.position.x + enemyPlatform.velocity.x * fallbackTime,
+      y: enemyPlatform.position.y + enemyPlatform.velocity.y * fallbackTime,
     };
-    const fallbackDistance = distanceBetween(resource.position, fallbackPoint);
+    const fallbackDistance = distanceBetween(
+      alliedPlatform.position,
+      fallbackPoint,
+    );
 
     return {
       point: fallbackPoint,
       distance: fallbackDistance,
-      timeToIntercept: fallbackDistance / resourceSpeed,
+      timeToIntercept: fallbackDistance / alliedSpeed + maneuverDelay,
       enemyTimeToCity,
       feasibleBeforeImpact: false,
+      acquisitionFeasible,
     };
   }
 
+  const interceptTime = rawInterceptTime + maneuverDelay;
   const point = {
-    x: enemy.position.x + enemy.velocity.x * interceptTime,
-    y: enemy.position.y + enemy.velocity.y * interceptTime,
+    x: enemyPlatform.position.x + enemyPlatform.velocity.x * interceptTime,
+    y: enemyPlatform.position.y + enemyPlatform.velocity.y * interceptTime,
   };
-  const distance = distanceBetween(resource.position, point);
+  const distance = distanceBetween(alliedPlatform.position, point);
   const latestSafeInterceptTime = Number.isFinite(enemyTimeToCity)
     ? Math.max(0, enemyTimeToCity - interceptLeadBufferSeconds)
     : Number.POSITIVE_INFINITY;
@@ -154,6 +209,8 @@ export function predictIntercept(
     distance: directDistance > epsilon ? distance : 0,
     timeToIntercept: interceptTime,
     enemyTimeToCity,
-    feasibleBeforeImpact: interceptTime <= latestSafeInterceptTime,
+    feasibleBeforeImpact:
+      acquisitionFeasible && interceptTime <= latestSafeInterceptTime,
+    acquisitionFeasible,
   };
 }

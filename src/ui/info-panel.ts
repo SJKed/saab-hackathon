@@ -1,8 +1,13 @@
 import type { ResourceAssignment } from "../engine/allocation";
 import type { CombatLogEvent } from "../engine/combat";
+import type { EnemyDirectorSnapshot } from "../engine/enemy-director";
 
 type InfoPanelApi = {
-  update: (assignments: ResourceAssignment[], events: CombatLogEvent[]) => void;
+  update: (
+    assignments: ResourceAssignment[],
+    events: CombatLogEvent[],
+    directorSnapshot: EnemyDirectorSnapshot,
+  ) => void;
 };
 
 type Tone = {
@@ -246,7 +251,13 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
   route.appendChild(routeTitle);
 
   const routeMeta = document.createElement("div");
-  routeMeta.textContent = `${assignment.distance.toFixed(0)} px projected path`;
+  const interceptTimeLabel =
+    assignment.interceptTimeSeconds === undefined
+      ? ""
+      : ` | ETA ${assignment.interceptTimeSeconds.toFixed(1)} s`;
+  const weaponLabel = assignment.weaponName ? ` | ${assignment.weaponName}` : "";
+  routeMeta.textContent =
+    `${assignment.distance.toFixed(0)} px projected path${interceptTimeLabel}${weaponLabel}`;
   setStyles(routeMeta, {
     color: "#9fb6be",
     fontSize: "11px",
@@ -254,7 +265,29 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
   route.appendChild(routeMeta);
 
   header.appendChild(route);
-  header.appendChild(createPill(missionLabel, missionTone));
+  const headerPills = document.createElement("div");
+  setStyles(headerPills, {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: "6px",
+  });
+  headerPills.appendChild(createPill(missionLabel, missionTone));
+  if (assignment.weaponClass) {
+    headerPills.appendChild(
+      createPill(
+        assignment.weaponClass === "airToAirMissile"
+          ? "A2A Missile"
+          : assignment.weaponClass === "rapidFire"
+            ? "Rapid Fire"
+            : assignment.weaponClass === "bomb"
+              ? "Bomb"
+              : "Weapon",
+        assignment.mission === "intercept" ? lowTone : mediumTone,
+      ),
+    );
+  }
+  header.appendChild(headerPills);
   item.appendChild(header);
 
   const explanationBlock = document.createElement("div");
@@ -306,6 +339,19 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
       priorityTone,
     ),
   );
+  if (assignment.expectedEffectiveness !== undefined) {
+    scoreGrid.appendChild(
+      createMetricCard(
+        "Weapon Match",
+        assignment.expectedEffectiveness.toFixed(2),
+        assignment.expectedEffectiveness >= 0.8
+          ? lowTone
+          : assignment.expectedEffectiveness >= 0.45
+            ? mediumTone
+            : highTone,
+      ),
+    );
+  }
   item.appendChild(scoreGrid);
 
   return item;
@@ -346,6 +392,20 @@ function createEventItem(event: CombatLogEvent): HTMLDivElement {
   eventItem.appendChild(eventText);
 
   return eventItem;
+}
+
+function getAggressionTone(
+  directorSnapshot: EnemyDirectorSnapshot,
+): Tone {
+  switch (directorSnapshot.aggressionTier) {
+    case "surge":
+      return highTone;
+    case "pressure":
+      return mediumTone;
+    case "opening":
+    default:
+      return lowTone;
+  }
 }
 
 export function createInfoPanel(container: HTMLElement): InfoPanelApi {
@@ -458,6 +518,12 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     "Why each resource is intercepting or reinforcing.",
   );
   body.appendChild(assignmentsSection.root);
+
+  const postureSection = createSection(
+    "Enemy Escalation",
+    "Launch pacing, pressure level, and the most exposed cities.",
+  );
+  body.appendChild(postureSection.root);
 
   const eventSection = createSection(
     "Combat Event Log",
@@ -581,8 +647,13 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
 
   window.addEventListener("resize", clampPanelToContainer);
 
-  const render = (assignments: ResourceAssignment[], events: CombatLogEvent[]): void => {
+  const render = (
+    assignments: ResourceAssignment[],
+    events: CombatLogEvent[],
+    directorSnapshot: EnemyDirectorSnapshot,
+  ): void => {
     assignmentsSection.content.innerHTML = "";
+    postureSection.content.innerHTML = "";
     eventSection.content.innerHTML = "";
 
     const assignmentTone =
@@ -604,6 +675,113 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
       }
     }
 
+    const aggressionTone = getAggressionTone(directorSnapshot);
+    const postureMetrics = document.createElement("div");
+    setStyles(postureMetrics, {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "8px",
+    });
+    postureMetrics.appendChild(
+      createMetricCard("Aggression Tier", directorSnapshot.aggressionLabel, aggressionTone),
+    );
+    postureMetrics.appendChild(
+      createMetricCard(
+        "Active Enemy Cap",
+        `${directorSnapshot.activeEnemyCount} / ${directorSnapshot.activeEnemyCap}`,
+        directorSnapshot.activeEnemyCount >= directorSnapshot.activeEnemyCap
+          ? highTone
+          : directorSnapshot.activeEnemyCount >=
+              Math.max(1, directorSnapshot.activeEnemyCap - 2)
+            ? mediumTone
+            : lowTone,
+      ),
+    );
+    postureSection.content.appendChild(postureMetrics);
+
+    if (directorSnapshot.cityExposureScores.length > 0) {
+      const exposureList = document.createElement("div");
+      setStyles(exposureList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const cityExposure of directorSnapshot.cityExposureScores) {
+        const tone =
+          cityExposure.exposure >= 7
+            ? highTone
+            : cityExposure.exposure >= 5
+              ? mediumTone
+              : lowTone;
+        const row = document.createElement("div");
+        setStyles(row, {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          padding: "8px",
+          border: `1px solid ${tone.border}`,
+          borderRadius: "7px",
+          background: "rgba(16, 36, 42, 0.48)",
+        });
+
+        const label = document.createElement("div");
+        label.textContent = cityExposure.cityName;
+        setStyles(label, {
+          color: "#e5eef2",
+          fontSize: "12px",
+          fontWeight: "700",
+          lineHeight: "1.25",
+        });
+        row.appendChild(label);
+
+        const meta = document.createElement("div");
+        meta.textContent = `Exposure ${cityExposure.exposure.toFixed(2)}`;
+        setStyles(meta, {
+          color: tone.color,
+          fontSize: "11px",
+          fontWeight: "800",
+          lineHeight: "1",
+          whiteSpace: "nowrap",
+        });
+        row.appendChild(meta);
+        exposureList.appendChild(row);
+      }
+
+      postureSection.content.appendChild(exposureList);
+    }
+
+    if (directorSnapshot.recentLaunches.length === 0) {
+      postureSection.content.appendChild(
+        createEmptyState("Enemy bases are still holding inventory and probing for openings."),
+      );
+    } else {
+      const launchList = document.createElement("div");
+      setStyles(launchList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const launch of directorSnapshot.recentLaunches.slice(0, 4)) {
+        const item = document.createElement("div");
+        item.textContent = launch;
+        setStyles(item, {
+          padding: "8px",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+          borderRadius: "7px",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: "#c7d5da",
+          fontSize: "12px",
+          lineHeight: "1.35",
+        });
+        launchList.appendChild(item);
+      }
+
+      postureSection.content.appendChild(launchList);
+    }
+
     if (events.length === 0) {
       eventSection.content.appendChild(createEmptyState("No combat events yet."));
     } else {
@@ -613,7 +791,19 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     }
   };
 
-  render([], []);
+  render(
+    [],
+    [],
+    {
+      aggressionTier: "opening",
+      aggressionLabel: "Opening Probe",
+      aggressionPercent: 26,
+      activeEnemyCount: 0,
+      activeEnemyCap: 0,
+      cityExposureScores: [],
+      recentLaunches: [],
+    },
+  );
 
   return {
     update: render,

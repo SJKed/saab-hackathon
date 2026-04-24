@@ -1,70 +1,198 @@
+import { createEnemyPlatforms } from "../data/platform-factories";
 import type {
   AlliedCity,
-  Enemy,
+  AlliedSpawnZone,
   EnemyBase,
-  EnemyPlatform,
-  EnemyType,
-  Resource,
+  MobilePlatform,
   Vector,
 } from "../models/entity";
+import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
+import {
+  clonePlatform,
+  distanceBetween,
+  getUsableAmmoCost,
+  isPlatformStored,
+  isPlatformDestroyed,
+} from "../models/platform-utils";
 import type { ResourceAssignment } from "../engine/allocation";
-import { getScaledResourceSpeed, predictIntercept } from "../engine/intercept";
+import { getPlatformTransitSpeed, predictIntercept } from "../engine/intercept";
 
-const minimumDistanceToTarget = 6;
-const minimumDistanceToResourceTarget = 10;
+const minimumDistanceToTarget = 8;
+const minimumDistanceToAssignmentTarget = 10;
+const minimumReturnDistance = 10;
 
-type DeploymentPlan = {
-  platform: EnemyPlatform;
-  type: EnemyType;
-  threatLevel: number;
-  label: string;
-};
+function getRedeploymentDelaySeconds(platform: MobilePlatform): number {
+  if (platform.team === "allied") {
+    return 0;
+  }
 
-const deploymentPlans: DeploymentPlan[] = [
-  {
-    platform: "airplane",
-    type: "attacker",
-    threatLevel: 0.85,
-    label: "Aircraft",
-  },
-  {
-    platform: "drone",
-    type: "recon",
-    threatLevel: 0.45,
-    label: "Drone",
-  },
-];
-
-function distanceSquared(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  return dx * dx + dy * dy;
+  return ENEMY_DEPLOYMENT_HOLD_SECONDS;
 }
 
-function getEnemySpeed(enemy: Enemy): number {
-  if (enemy.platform === "airplane") {
-    return 125;
+function getOriginPosition(
+  platform: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+  enemyBases: EnemyBase[],
+): Vector | undefined {
+  if (!platform.originId) {
+    return undefined;
   }
 
-  if (enemy.platform === "drone") {
-    return 82;
+  if (platform.team === "allied") {
+    return alliedSpawnZones.find((zone) => zone.id === platform.originId)?.position;
   }
 
-  switch (enemy.type) {
-    case "attacker":
-      return 70;
-    case "flanker":
-      return 85;
-    case "recon":
-      return 100;
-    default:
-      return 70;
-  }
+  return enemyBases.find((base) => base.id === platform.originId)?.position;
 }
 
-function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefined {
-  if (enemy.targetId) {
-    const matchedTarget = cities.find((city) => city.id === enemy.targetId);
+function refreshWeapons(
+  platform: MobilePlatform,
+  deltaSeconds: number,
+): MobilePlatform["weapons"] {
+  return platform.weapons.map((weapon) => ({
+    ...weapon,
+    cooldown: Math.max(0, weapon.cooldown - deltaSeconds),
+  }));
+}
+
+function hasRemainingAmmo(platform: MobilePlatform): boolean {
+  if (platform.oneWay) {
+    return true;
+  }
+
+  return platform.weapons.some(
+    (weapon) => weapon.ammunition >= getUsableAmmoCost(weapon),
+  );
+}
+
+function applyPassiveStateUpdates(
+  platform: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+  enemyBases: EnemyBase[],
+  deltaSeconds: number,
+): MobilePlatform {
+  if (isPlatformDestroyed(platform)) {
+    return {
+      ...platform,
+      velocity: { x: 0, y: 0 },
+      status: "destroyed",
+      combat: {
+        ...platform.combat,
+        durability: 0,
+      },
+      weapons: refreshWeapons(platform, deltaSeconds),
+    };
+  }
+
+  const refreshedWeapons = refreshWeapons(platform, deltaSeconds);
+  const isAirborne =
+    platform.status !== "stored" &&
+    platform.status !== "idle" &&
+    platform.status !== "destroyed";
+  const enduranceSeconds = Math.max(
+    0,
+    platform.enduranceSeconds - (isAirborne ? deltaSeconds : 0),
+  );
+
+  let nextPlatform: MobilePlatform = {
+    ...platform,
+    enduranceSeconds,
+    deploymentDelaySeconds: isPlatformStored(platform)
+      ? Math.max(0, platform.deploymentDelaySeconds - deltaSeconds)
+      : platform.deploymentDelaySeconds,
+    weapons: refreshedWeapons,
+  };
+
+  if (
+    !nextPlatform.oneWay &&
+    !isPlatformStored(nextPlatform) &&
+    enduranceSeconds <= 8 &&
+    !nextPlatform.engagedWithId
+  ) {
+    nextPlatform = {
+      ...nextPlatform,
+      status: "returning",
+      targetId: nextPlatform.originId,
+    };
+  }
+
+  const originPosition = getOriginPosition(
+    nextPlatform,
+    alliedSpawnZones,
+    enemyBases,
+  );
+  if (!originPosition) {
+    return nextPlatform;
+  }
+
+  const distanceToOrigin = distanceBetween(nextPlatform.position, originPosition);
+  if (
+    distanceToOrigin <= minimumReturnDistance &&
+    (nextPlatform.status === "returning" || nextPlatform.status === "idle")
+  ) {
+    return {
+      ...nextPlatform,
+      position: { ...originPosition },
+      velocity: { x: 0, y: 0 },
+      status: "stored",
+      targetId: undefined,
+      engagedWithId: undefined,
+      enduranceSeconds: nextPlatform.maxEnduranceSeconds,
+      deploymentDelaySeconds: getRedeploymentDelaySeconds(nextPlatform),
+      weapons: nextPlatform.weapons.map((weapon) => ({
+        ...weapon,
+        ammunition: weapon.maxAmmunition,
+        cooldown: 0,
+      })),
+    };
+  }
+
+  return nextPlatform;
+}
+
+function movePlatformTowards(
+  platform: MobilePlatform,
+  targetPosition: Vector,
+  minDistance: number,
+  speedOverride: number | undefined,
+  deltaSeconds: number,
+): MobilePlatform {
+  const dx = targetPosition.x - platform.position.x;
+  const dy = targetPosition.y - platform.position.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance <= minDistance) {
+    return {
+      ...platform,
+      velocity: { x: 0, y: 0 },
+      position: { ...platform.position },
+    };
+  }
+
+  const directionX = dx / distance;
+  const directionY = dy / distance;
+  const speed = speedOverride ?? getPlatformTransitSpeed(platform);
+  const movementStep = Math.min(speed * deltaSeconds, distance - minDistance);
+
+  return {
+    ...platform,
+    velocity: {
+      x: directionX * speed,
+      y: directionY * speed,
+    },
+    position: {
+      x: platform.position.x + directionX * movementStep,
+      y: platform.position.y + directionY * movementStep,
+    },
+  };
+}
+
+function getTargetCity(
+  platform: MobilePlatform,
+  cities: AlliedCity[],
+): AlliedCity | undefined {
+  if (platform.targetId) {
+    const matchedTarget = cities.find((city) => city.id === platform.targetId);
     if (matchedTarget) {
       return matchedTarget;
     }
@@ -74,7 +202,7 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
   let nearestDistance = Number.POSITIVE_INFINITY;
 
   for (const city of cities) {
-    const currentDistance = distanceSquared(enemy.position, city.position);
+    const currentDistance = distanceBetween(platform.position, city.position);
     if (currentDistance < nearestDistance) {
       nearestDistance = currentDistance;
       nearestCity = city;
@@ -84,19 +212,21 @@ function getTargetCity(enemy: Enemy, cities: AlliedCity[]): AlliedCity | undefin
   return nearestCity;
 }
 
-function getResourceAssignmentTarget(
-  resource: Resource,
+function getAssignmentTarget(
+  platform: MobilePlatform,
   assignment: ResourceAssignment,
   cities: AlliedCity[],
-  enemies: Enemy[],
+  enemyPlatforms: MobilePlatform[],
 ): Vector | undefined {
   if (assignment.mission === "intercept") {
-    const enemy = enemies.find((item) => item.id === assignment.targetId);
-    if (!enemy) {
+    const enemyPlatform = enemyPlatforms.find(
+      (enemy) => enemy.id === assignment.targetId,
+    );
+    if (!enemyPlatform) {
       return undefined;
     }
 
-    return predictIntercept(resource, enemy, cities)?.point ?? enemy.position;
+    return predictIntercept(platform, enemyPlatform, cities)?.point ?? enemyPlatform.position;
   }
 
   return cities.find((city) => city.id === assignment.targetId)?.position;
@@ -105,174 +235,252 @@ function getResourceAssignmentTarget(
 export function createEnemyDeployments(
   enemyBases: EnemyBase[],
   cities: AlliedCity[],
-): Enemy[] {
-  if (enemyBases.length === 0 || cities.length === 0) {
-    return [];
-  }
-
-  return enemyBases.flatMap((enemyBase, enemyBaseIndex) =>
-    deploymentPlans.map((plan, planIndex) => {
-      const targetCity = cities[(enemyBaseIndex + planIndex) % cities.length];
-      const offsetAngle =
-        (Math.PI * 2 * planIndex) / deploymentPlans.length + enemyBaseIndex * 0.55;
-      const offsetRadius = 18;
-      const position = {
-        x: enemyBase.position.x + Math.cos(offsetAngle) * offsetRadius,
-        y: enemyBase.position.y + Math.sin(offsetAngle) * offsetRadius,
-      };
-      const attack = plan.platform === "airplane" ? 58 : 36;
-      const defense = plan.platform === "airplane" ? 40 : 30;
-      const health = plan.platform === "airplane" ? 118 : 82;
-
-      return {
-        id: `${enemyBase.id}-${plan.platform}-${planIndex + 1}`,
-        name: `${enemyBase.id} ${plan.label}`,
-        position,
-        velocity: { x: 0, y: 0 },
-        engagedWithId: undefined,
-        type: plan.type,
-        platform: plan.platform,
-        threatLevel: plan.threatLevel,
-        originBaseId: enemyBase.id,
-        targetId: targetCity.id,
-        attack,
-        defense,
-        health,
-      };
-    }),
-  );
+): MobilePlatform[] {
+  return createEnemyPlatforms(enemyBases, cities);
 }
 
 export function updateEnemyPositions(
-  enemies: Enemy[],
+  enemyPlatforms: MobilePlatform[],
   cities: AlliedCity[],
+  enemyBases: EnemyBase[],
   deltaSeconds: number,
-): Enemy[] {
-  if (cities.length === 0 || deltaSeconds <= 0) {
-    return enemies;
+): MobilePlatform[] {
+  if (deltaSeconds <= 0) {
+    return enemyPlatforms.map(clonePlatform);
   }
 
-  return enemies.map((enemy) => {
-    if (enemy.engagedWithId) {
+  return enemyPlatforms.map((currentPlatform) => {
+    const platform = applyPassiveStateUpdates(
+      clonePlatform(currentPlatform),
+      [],
+      enemyBases,
+      deltaSeconds,
+    );
+
+    if (platform.status === "destroyed") {
+      return platform;
+    }
+
+    if (isPlatformStored(platform)) {
+      if (platform.deploymentDelaySeconds > 0) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      const targetCity = getTargetCity(platform, cities);
+      if (!targetCity) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      return movePlatformTowards(
+        {
+          ...platform,
+          status: "transit",
+          targetId: targetCity.id,
+          deploymentDelaySeconds: 0,
+        },
+        targetCity.position,
+        minimumDistanceToTarget,
+        platform.oneWay ? platform.maxSpeed : getPlatformTransitSpeed(platform),
+        deltaSeconds,
+      );
+    }
+
+    if (platform.engagedWithId) {
       return {
-        ...enemy,
+        ...platform,
+        status: "engaging",
         velocity: { x: 0, y: 0 },
       };
     }
 
-    const targetCity = getTargetCity(enemy, cities);
+    if (!platform.oneWay && (platform.status === "returning" || !hasRemainingAmmo(platform))) {
+      const originPosition = getOriginPosition(platform, [], enemyBases);
+      if (!originPosition) {
+        return platform;
+      }
+
+      return movePlatformTowards(
+        { ...platform, status: "returning", targetId: platform.originId },
+        originPosition,
+        minimumReturnDistance,
+        platform.cruiseSpeed,
+        deltaSeconds,
+      );
+    }
+
+    const targetCity = getTargetCity(platform, cities);
     if (!targetCity) {
-      return enemy;
-    }
-
-    const dx = targetCity.position.x - enemy.position.x;
-    const dy = targetCity.position.y - enemy.position.y;
-    const distance = Math.hypot(dx, dy);
-
-    if (distance <= minimumDistanceToTarget) {
       return {
-        ...enemy,
-        targetId: targetCity.id,
+        ...platform,
         velocity: { x: 0, y: 0 },
       };
     }
 
-    const directionX = dx / distance;
-    const directionY = dy / distance;
-    const speed = getEnemySpeed(enemy);
-    const movementStep = Math.min(speed * deltaSeconds, distance - minimumDistanceToTarget);
+    const movedPlatform = movePlatformTowards(
+      { ...platform, status: "transit", targetId: targetCity.id },
+      targetCity.position,
+      minimumDistanceToTarget,
+      platform.oneWay ? platform.maxSpeed : getPlatformTransitSpeed(platform),
+      deltaSeconds,
+    );
 
-    const velocity = {
-      x: directionX * speed,
-      y: directionY * speed,
-    };
-
-    return {
-      ...enemy,
-      targetId: targetCity.id,
-      velocity,
-      position: {
-        x: enemy.position.x + directionX * movementStep,
-        y: enemy.position.y + directionY * movementStep,
-      },
-    };
+    return movedPlatform;
   });
 }
 
 export function updateResourcePositions(
-  resources: Resource[],
+  alliedPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
   cities: AlliedCity[],
-  enemies: Enemy[],
+  enemyPlatforms: MobilePlatform[],
+  alliedSpawnZones: AlliedSpawnZone[],
   deltaSeconds: number,
-): Resource[] {
+): MobilePlatform[] {
   if (deltaSeconds <= 0) {
-    return resources;
+    return alliedPlatforms.map(clonePlatform);
   }
 
-  return resources.map((resource) => {
-    if (resource.engagedWithId) {
+  return alliedPlatforms.map((currentPlatform) => {
+    const platform = applyPassiveStateUpdates(
+      clonePlatform(currentPlatform),
+      alliedSpawnZones,
+      [],
+      deltaSeconds,
+    );
+
+    if (platform.status === "destroyed") {
+      return platform;
+    }
+
+    if (isPlatformStored(platform)) {
+      const assignment = assignments.find((item) => item.resourceId === platform.id);
+      if (!assignment) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      const targetPosition = getAssignmentTarget(
+        platform,
+        assignment,
+        cities,
+        enemyPlatforms,
+      );
+      if (!targetPosition) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      const nextStatus =
+        assignment.mission === "intercept" ? "intercepting" : "reinforcing";
+      return movePlatformTowards(
+        {
+          ...platform,
+          status: nextStatus,
+          targetId: assignment.targetId,
+          deploymentDelaySeconds: 0,
+        },
+        targetPosition,
+        minimumDistanceToAssignmentTarget,
+        getPlatformTransitSpeed(platform),
+        deltaSeconds,
+      );
+    }
+
+    if (platform.engagedWithId) {
       return {
-        ...resource,
-        available: false,
+        ...platform,
+        status: "engaging",
         velocity: { x: 0, y: 0 },
       };
     }
 
-    const assignment = assignments.find((item) => item.resourceId === resource.id);
+    if (!hasRemainingAmmo(platform) && !platform.oneWay) {
+      const originPosition = getOriginPosition(platform, alliedSpawnZones, []);
+      if (!originPosition) {
+        return platform;
+      }
+
+      return movePlatformTowards(
+        { ...platform, status: "returning", targetId: platform.originId },
+        originPosition,
+        minimumReturnDistance,
+        platform.cruiseSpeed,
+        deltaSeconds,
+      );
+    }
+
+    const assignment = assignments.find((item) => item.resourceId === platform.id);
     if (!assignment) {
-      return {
-        ...resource,
-        available: true,
-        velocity: { x: 0, y: 0 },
-      };
+      const originPosition = getOriginPosition(platform, alliedSpawnZones, []);
+      if (!originPosition) {
+        return {
+          ...platform,
+          status: "stored",
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      if (distanceBetween(platform.position, originPosition) <= minimumReturnDistance) {
+        return {
+          ...platform,
+          position: { ...originPosition },
+          status: "stored",
+          velocity: { x: 0, y: 0 },
+          targetId: undefined,
+          engagedWithId: undefined,
+          enduranceSeconds: platform.maxEnduranceSeconds,
+          deploymentDelaySeconds: 0,
+          weapons: platform.weapons.map((weapon) => ({
+            ...weapon,
+            ammunition: weapon.maxAmmunition,
+            cooldown: 0,
+          })),
+        };
+      }
+
+      return movePlatformTowards(
+        { ...platform, status: "returning", targetId: platform.originId },
+        originPosition,
+        minimumReturnDistance,
+        platform.cruiseSpeed,
+        deltaSeconds,
+      );
     }
 
-    const targetPosition = getResourceAssignmentTarget(
-      resource,
+    const targetPosition = getAssignmentTarget(
+      platform,
       assignment,
       cities,
-      enemies,
+      enemyPlatforms,
     );
     if (!targetPosition) {
       return {
-        ...resource,
-        available: true,
+        ...platform,
+        status: "idle",
         velocity: { x: 0, y: 0 },
       };
     }
 
-    const dx = targetPosition.x - resource.position.x;
-    const dy = targetPosition.y - resource.position.y;
-    const distance = Math.hypot(dx, dy);
-
-    if (distance <= minimumDistanceToResourceTarget) {
-      return {
-        ...resource,
-        available: false,
-        velocity: { x: 0, y: 0 },
-      };
-    }
-
-    const directionX = dx / distance;
-    const directionY = dy / distance;
-    const speed = getScaledResourceSpeed(resource);
-    const movementStep = Math.min(
-      speed * deltaSeconds,
-      distance - minimumDistanceToResourceTarget,
+    const nextStatus =
+      assignment.mission === "intercept" ? "intercepting" : "reinforcing";
+    const updatedPlatform = movePlatformTowards(
+      { ...platform, status: nextStatus, targetId: assignment.targetId },
+      targetPosition,
+      minimumDistanceToAssignmentTarget,
+      getPlatformTransitSpeed(platform),
+      deltaSeconds,
     );
 
-    return {
-      ...resource,
-      available: false,
-      velocity: {
-        x: directionX * speed,
-        y: directionY * speed,
-      },
-      position: {
-        x: resource.position.x + directionX * movementStep,
-        y: resource.position.y + directionY * movementStep,
-      },
-    };
+    return updatedPlatform;
   });
 }
