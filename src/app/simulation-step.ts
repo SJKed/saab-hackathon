@@ -102,6 +102,7 @@ export function advanceSimulation(
     assignments: allocationResult.assignments,
     alliedPostureMemory: allocationResult.postureMemory,
     alliedPostureSnapshot: allocationResult.postureSnapshot,
+    responsePlannerSnapshot: allocationResult.plannerSnapshot,
     eventLog,
     combatEffects,
     enemyDirectorState: enemyDeploymentState.directorState,

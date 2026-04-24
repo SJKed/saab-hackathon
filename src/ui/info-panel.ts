@@ -1,6 +1,7 @@
 import type { ResourceAssignment } from "../engine/allocation";
 import type { CombatLogEvent } from "../engine/combat";
 import type { EnemyDirectorSnapshot } from "../engine/enemy-director";
+import type { ResponsePlannerSnapshot } from "../engine/planning";
 import type { AlliedForcePostureSnapshot } from "../engine/posture";
 
 type InfoPanelApi = {
@@ -8,6 +9,7 @@ type InfoPanelApi = {
     assignments: ResourceAssignment[],
     events: CombatLogEvent[],
     alliedPostureSnapshot: AlliedForcePostureSnapshot,
+    responsePlannerSnapshot: ResponsePlannerSnapshot,
     directorSnapshot: EnemyDirectorSnapshot,
   ) => void;
 };
@@ -533,6 +535,12 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
   );
   body.appendChild(assignmentsSection.root);
 
+  const plannerSection = createSection(
+    "Response Planner",
+    "Portfolio-level rationale, confidence, and fallback state.",
+  );
+  body.appendChild(plannerSection.root);
+
   const postureSection = createSection(
     "Force Posture",
     "Why each side is surging, holding, or standing down.",
@@ -665,9 +673,11 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     assignments: ResourceAssignment[],
     events: CombatLogEvent[],
     alliedPostureSnapshot: AlliedForcePostureSnapshot,
+    responsePlannerSnapshot: ResponsePlannerSnapshot,
     directorSnapshot: EnemyDirectorSnapshot,
   ): void => {
     assignmentsSection.content.innerHTML = "";
+    plannerSection.content.innerHTML = "";
     postureSection.content.innerHTML = "";
     eventSection.content.innerHTML = "";
 
@@ -688,6 +698,100 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
       for (const assignment of assignments) {
         assignmentsSection.content.appendChild(createAssignmentCard(assignment));
       }
+    }
+
+    const plannerTone =
+      responsePlannerSnapshot.mode === "portfolio-beam"
+        ? responsePlannerSnapshot.objectiveScore >= 18
+          ? highTone
+          : mediumTone
+        : lowTone;
+    const plannerSummary = createEmptyState(
+      `${responsePlannerSnapshot.mode === "portfolio-beam" ? "Portfolio planner active." : "Heuristic fallback active."} ` +
+        `${responsePlannerSnapshot.primaryRationale}`,
+    );
+    setStyles(plannerSummary, {
+      border: `1px solid ${plannerTone.border}`,
+      background: plannerTone.background,
+      color: "#dfe9ec",
+    });
+    plannerSection.content.appendChild(plannerSummary);
+
+    const plannerMetrics = document.createElement("div");
+    setStyles(plannerMetrics, {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "8px",
+    });
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Plan Mode",
+        responsePlannerSnapshot.mode === "portfolio-beam" ? "Portfolio Beam" : "Fallback",
+        plannerTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Objective",
+        responsePlannerSnapshot.objectiveScore.toFixed(1),
+        plannerTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Actions Considered",
+        `${responsePlannerSnapshot.consideredActionCount}`,
+        mediumTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Actions Selected",
+        `${responsePlannerSnapshot.selectedActionCount}`,
+        lowTone,
+      ),
+    );
+    plannerSection.content.appendChild(plannerMetrics);
+
+    if (responsePlannerSnapshot.beliefSummaries.length > 0) {
+      const beliefList = document.createElement("div");
+      setStyles(beliefList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const belief of responsePlannerSnapshot.beliefSummaries) {
+        const tone =
+          belief.confidence >= 0.78
+            ? highTone
+            : belief.confidence >= 0.55
+              ? mediumTone
+              : lowTone;
+        const item = document.createElement("div");
+        item.textContent =
+          `Enemy ${belief.enemyId.slice(0, 6)} -> ${belief.targetName} ` +
+          `(${(belief.confidence * 100).toFixed(0)}% confidence)`;
+        setStyles(item, {
+          padding: "8px",
+          border: `1px solid ${tone.border}`,
+          borderRadius: "7px",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: tone.color,
+          fontSize: "12px",
+          fontWeight: "700",
+          lineHeight: "1.35",
+        });
+        beliefList.appendChild(item);
+      }
+
+      plannerSection.content.appendChild(beliefList);
+    }
+
+    if (responsePlannerSnapshot.alternativeSummary) {
+      plannerSection.content.appendChild(
+        createEmptyState(responsePlannerSnapshot.alternativeSummary),
+      );
     }
 
     const aggressionTone = getAggressionTone(directorSnapshot);
@@ -899,6 +1003,14 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
       recommendedActiveCount: 1,
       incursionCount: 0,
       cityStates: [],
+    },
+    {
+      mode: "heuristic-fallback",
+      objectiveScore: 0,
+      consideredActionCount: 0,
+      selectedActionCount: 0,
+      primaryRationale: "No response plan has been generated yet.",
+      beliefSummaries: [],
     },
     {
       aggressionTier: "opening",

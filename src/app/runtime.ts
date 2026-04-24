@@ -153,6 +153,7 @@ export function startSimulation(shell: AppShell): void {
       state.assignments,
       state.eventLog,
       state.alliedPostureSnapshot,
+      state.responsePlannerSnapshot,
       state.enemyDirectorState.snapshot,
     );
     metricsHud.update(

@@ -22,6 +22,11 @@ import {
   type AlliedForcePostureSnapshot,
   type TeamPostureMemory,
 } from "./posture";
+import {
+  generatePlannerCandidates,
+  runPortfolioPlanner,
+  type ResponsePlannerSnapshot,
+} from "./planning";
 
 export type ResourceMission = "intercept" | "reinforce";
 
@@ -45,6 +50,7 @@ export type AllocationResult = {
   assignments: ResourceAssignment[];
   postureMemory: TeamPostureMemory;
   postureSnapshot: AlliedForcePostureSnapshot;
+  plannerSnapshot: ResponsePlannerSnapshot;
 };
 
 type OriginReserve = {
@@ -334,23 +340,12 @@ function canReinforce(alliedPlatform: MobilePlatform): boolean {
   );
 }
 
-export function allocateResources(
+function allocateHeuristicResources(
   cities: AlliedCity[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
-  postureMemory: TeamPostureMemory,
-  deltaSeconds: number,
-): AllocationResult {
-  const posture = applyPostureMemory(
-    evaluateAlliedForcePosture(cities, alliedPlatforms, enemyPlatforms),
-    postureMemory,
-    deltaSeconds,
-    {
-      surplusThreshold: 2.15,
-      demandGapThreshold: 1.15,
-    },
-  );
-  const postureSnapshot = posture.snapshot;
+  postureSnapshot: AlliedForcePostureSnapshot,
+): ResourceAssignment[] {
   const assignments: ResourceAssignment[] = [];
   const reservedPlatformIds = new Set<string>();
   const storedReserveByOrigin = getStoredReserveByOrigin(alliedPlatforms);
@@ -468,7 +463,7 @@ export function allocateResources(
   }
 
   if (activeEnemyPlatforms.length === 0) {
-    return { assignments, postureMemory: posture.memory, postureSnapshot };
+    return assignments;
   }
 
   const cityPostureById = new Map(
@@ -604,5 +599,76 @@ export function allocateResources(
     });
   }
 
-  return { assignments, postureMemory: posture.memory, postureSnapshot };
+  return assignments;
+}
+
+export function allocateResources(
+  cities: AlliedCity[],
+  alliedPlatforms: MobilePlatform[],
+  enemyPlatforms: MobilePlatform[],
+  postureMemory: TeamPostureMemory,
+  deltaSeconds: number,
+): AllocationResult {
+  const posture = applyPostureMemory(
+    evaluateAlliedForcePosture(cities, alliedPlatforms, enemyPlatforms),
+    postureMemory,
+    deltaSeconds,
+    {
+      surplusThreshold: 2.15,
+      demandGapThreshold: 1.15,
+    },
+  );
+  const postureSnapshot = posture.snapshot;
+  const heuristicAssignments = allocateHeuristicResources(
+    cities,
+    alliedPlatforms,
+    enemyPlatforms,
+    postureSnapshot,
+  );
+  const plannerInputs = generatePlannerCandidates({
+    cities,
+    alliedPlatforms,
+    enemyPlatforms,
+    postureSnapshot,
+  });
+  const plannedResult = runPortfolioPlanner({
+    candidates: plannerInputs.candidates,
+    postureSnapshot,
+  });
+  const plannerSnapshot: ResponsePlannerSnapshot = plannedResult
+    ? {
+        ...plannedResult.snapshot,
+        beliefSummaries: plannerInputs.beliefs
+          .slice(0, 4)
+          .map((belief) => ({
+            enemyId: belief.enemyId,
+            targetName: belief.mostLikelyCityName,
+            confidence: belief.confidence,
+          })),
+      }
+    : {
+        mode: "heuristic-fallback",
+        objectiveScore: heuristicAssignments.reduce(
+          (sum, assignment) => sum + assignment.priorityScore,
+          0,
+        ),
+        consideredActionCount: plannerInputs.candidates.length,
+        selectedActionCount: heuristicAssignments.length,
+        primaryRationale:
+          "The planner did not find a confident action bundle, so the heuristic allocator remained in control.",
+        beliefSummaries: plannerInputs.beliefs.slice(0, 4).map((belief) => ({
+          enemyId: belief.enemyId,
+          targetName: belief.mostLikelyCityName,
+          confidence: belief.confidence,
+        })),
+      };
+
+  return {
+    assignments: plannedResult?.assignments.length
+      ? plannedResult.assignments
+      : heuristicAssignments,
+    postureMemory: posture.memory,
+    postureSnapshot,
+    plannerSnapshot,
+  };
 }

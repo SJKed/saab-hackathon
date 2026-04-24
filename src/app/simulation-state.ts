@@ -12,6 +12,7 @@ import {
   type AlliedForcePostureSnapshot,
   type TeamPostureMemory,
 } from "../engine/posture";
+import type { ResponsePlannerSnapshot } from "../engine/planning";
 import {
   createMetricsState,
   type MetricsState,
@@ -43,6 +44,7 @@ export type SimulationState = {
   combatEffects: CombatVisualEffect[];
   alliedPostureMemory: TeamPostureMemory;
   alliedPostureSnapshot: AlliedForcePostureSnapshot;
+  responsePlannerSnapshot: ResponsePlannerSnapshot;
   enemyDirectorState: EnemyDirectorState;
   metricsState: MetricsState;
   simulationTick: number;
@@ -148,6 +150,14 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     combatEffects: [],
     alliedPostureMemory: alliedPosture.memory,
     alliedPostureSnapshot: alliedPosture.snapshot,
+    responsePlannerSnapshot: {
+      mode: "heuristic-fallback",
+      objectiveScore: 0,
+      consideredActionCount: 0,
+      selectedActionCount: 0,
+      primaryRationale: "No response plan has been generated yet.",
+      beliefSummaries: [],
+    },
     enemyDirectorState: createEnemyDirectorState(enemyBases),
     metricsState: createMetricsState(
       alliedCities,
