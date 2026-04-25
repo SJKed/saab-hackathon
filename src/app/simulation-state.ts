@@ -40,6 +40,9 @@ export type SimulationState = {
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
   assignments: ResourceAssignment[];
+  operatorAssignments: ResourceAssignment[];
+  advisorAssignments: ResourceAssignment[];
+  trainingFeedback: string[];
   eventLog: CombatLogEvent[];
   combatEffects: CombatVisualEffect[];
   alliedPostureMemory: TeamPostureMemory;
@@ -151,6 +154,9 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     alliedPlatforms,
     enemyPlatforms,
     assignments: [],
+    operatorAssignments: [],
+    advisorAssignments: [],
+    trainingFeedback: [],
     eventLog: [],
     combatEffects: [],
     alliedPostureMemory: alliedPosture.memory,

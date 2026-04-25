@@ -21,7 +21,7 @@ export function calculateCityThreat(city: AlliedCity, enemyPlatforms: MobilePlat
             distanceBetween(enemyPlatform.position, city.position),
         );
         const strikeWeight =
-            enemyPlatform.platformClass === "ballisticMissile" ? 1.35 : 1;
+            enemyPlatform.platformClass === "ballisticMissile" ? 1.50 : 1;
 
         return totalThreat + (enemyPlatform.threatLevel * strikeWeight) / distance;
     }, 0);

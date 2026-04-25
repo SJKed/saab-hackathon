@@ -1,7 +1,10 @@
+import type { CommandMode } from "../models/training";
+
 export type StrategyMode = "aggressive" | "defensive" | "balanced";
 
 export type ControlsState = {
   isRunning: boolean;
+  commandMode: CommandMode;
   strategy: StrategyMode;
   speedMultiplier: number;
 };
@@ -10,6 +13,7 @@ type ControlsApi = {
   getState: () => ControlsState;
   consumeRestartRequest: () => boolean;
   consumeResetViewRequest: () => boolean;
+  consumeStepRequest: () => boolean;
 };
 
 function createControlRow(label: string): HTMLDivElement {
@@ -30,11 +34,13 @@ function createControlRow(label: string): HTMLDivElement {
 export function createControls(container: HTMLElement): ControlsApi {
   const state: ControlsState = {
     isRunning: false,
+    commandMode: "auto",
     strategy: "balanced",
     speedMultiplier: 1,
   };
   let restartRequested = false;
   let resetViewRequested = false;
+  let stepRequested = false;
 
   const panel = document.createElement("aside");
   panel.style.position = "absolute";
@@ -70,6 +76,21 @@ export function createControls(container: HTMLElement): ControlsApi {
     startPauseButton.textContent = state.isRunning ? "Pause" : "Start";
   });
   panel.appendChild(startPauseButton);
+
+  const stepButton = document.createElement("button");
+  stepButton.textContent = "Step Tick";
+  stepButton.style.padding = "8px 10px";
+  stepButton.style.background = "#1d2f3a";
+  stepButton.style.color = "#f5f5f5";
+  stepButton.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+  stepButton.style.borderRadius = "6px";
+  stepButton.style.cursor = "pointer";
+  stepButton.addEventListener("click", () => {
+    state.isRunning = false;
+    startPauseButton.textContent = "Start";
+    stepRequested = true;
+  });
+  panel.appendChild(stepButton);
 
   const restartButton = document.createElement("button");
   restartButton.textContent = "Restart";
@@ -124,6 +145,32 @@ export function createControls(container: HTMLElement): ControlsApi {
   strategyRow.appendChild(strategySelect);
   panel.appendChild(strategyRow);
 
+  const modeRow = createControlRow("Allied Control");
+  const modeSelect = document.createElement("select");
+  modeSelect.style.padding = "7px 8px";
+  modeSelect.style.background = "#10242a";
+  modeSelect.style.color = "#f5f5f5";
+  modeSelect.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+  modeSelect.style.borderRadius = "6px";
+  const modes: Array<{ value: CommandMode; label: string }> = [
+    { value: "auto", label: "AI Auto" },
+    { value: "training", label: "Training" },
+  ];
+  for (const mode of modes) {
+    const option = document.createElement("option");
+    option.value = mode.value;
+    option.textContent = mode.label;
+    if (mode.value === state.commandMode) {
+      option.selected = true;
+    }
+    modeSelect.appendChild(option);
+  }
+  modeSelect.addEventListener("change", () => {
+    state.commandMode = modeSelect.value as CommandMode;
+  });
+  modeRow.appendChild(modeSelect);
+  panel.appendChild(modeRow);
+
   const speedRow = createControlRow("Speed");
   const speedValue = document.createElement("span");
   speedValue.textContent = "1.0x";
@@ -158,6 +205,11 @@ export function createControls(container: HTMLElement): ControlsApi {
     consumeResetViewRequest: () => {
       const wasRequested = resetViewRequested;
       resetViewRequested = false;
+      return wasRequested;
+    },
+    consumeStepRequest: () => {
+      const wasRequested = stepRequested;
+      stepRequested = false;
       return wasRequested;
     },
   };

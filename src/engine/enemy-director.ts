@@ -331,7 +331,7 @@ function selectTargetCity(
     const cityDistance = city
       ? distanceBetween(base.position, city.position)
       : Number.POSITIVE_INFINITY;
-    const proximityBias = Math.max(0.22, 1.2 - cityDistance / 980);
+    const proximityBias = Math.max(0.22, 2 - cityDistance / 980);
     const continuityBonus =
       baseState.lastTargetCityId === cityExposure.cityId ? 0.18 : 0;
     const saturationPenalty = cityExposure.activeThreatCount * 0.35;
