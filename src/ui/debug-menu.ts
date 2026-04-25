@@ -1,6 +1,7 @@
 import type { ResourceAssignment } from "../engine/allocation";
 import type { EnemyDirectorSnapshot } from "../engine/enemy-director";
 import type {
+  AlliedCity,
   AlliedSpawnZone,
   EnemyBase,
   MobilePlatform,
@@ -10,6 +11,7 @@ import {
   defaultDebugSettings,
   type DebugSettings,
   type EnemyAggressionOverride,
+  type RadarDetectorType,
 } from "../models/debug";
 import { isPlatformDeployed, isPlatformStored } from "../models/platform-utils";
 
@@ -17,6 +19,7 @@ type DebugMenuApi = {
   root: HTMLElement;
   getState: () => DebugSettings;
   update: (input: {
+    alliedCities: AlliedCity[];
     alliedSpawnZones: AlliedSpawnZone[];
     enemyBases: EnemyBase[];
     alliedPlatforms: MobilePlatform[];
@@ -31,6 +34,16 @@ type BaseToggleRow = {
   checkbox: HTMLInputElement;
   meta: HTMLSpanElement;
 };
+
+const radarDetectorOptions: Array<{
+  type: RadarDetectorType;
+  label: string;
+}> = [
+  { type: "fixedRadar", label: "Fixed radar" },
+  { type: "fighterJet", label: "Fighter radar" },
+  { type: "drone", label: "Drone sensors" },
+  { type: "ballisticMissile", label: "Ballistic missile sensors" },
+];
 
 function setStyles(element: HTMLElement, styles: Partial<CSSStyleDeclaration>): void {
   Object.assign(element.style, styles);
@@ -300,6 +313,19 @@ export function createDebugMenu(container: HTMLElement): DebugMenuApi {
   deploymentsSection.appendChild(enemyBaseList);
   content.appendChild(deploymentsSection);
 
+  const radarSection = createSection(
+    "Radar and sensors",
+    "Disable specific detector types without despawning the units or changing rendering geometry.",
+  );
+  const radarList = document.createElement("div");
+  setStyles(radarList, {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  });
+  radarSection.appendChild(radarList);
+  content.appendChild(radarSection);
+
   const tuningSection = createSection(
     "Combat and fuel",
     "Scale damage and fuel burn globally to stress-test balance assumptions quickly.",
@@ -413,6 +439,7 @@ export function createDebugMenu(container: HTMLElement): DebugMenuApi {
 
   const alliedBaseRows = new Map<string, BaseToggleRow>();
   const enemyBaseRows = new Map<string, BaseToggleRow>();
+  const radarRows = new Map<RadarDetectorType, BaseToggleRow>();
 
   function syncBaseRows(
     bases: Array<{ id: string; label: string }>,
@@ -504,6 +531,43 @@ export function createDebugMenu(container: HTMLElement): DebugMenuApi {
         row.meta.textContent =
           `${storedCount} stored | ${airborneCount} active | ` +
           `${input.directorSnapshot.aggressionLabel}`;
+      }
+
+      for (const option of radarDetectorOptions) {
+        let row = radarRows.get(option.type);
+        if (!row) {
+          row = createToggleRow(option.label);
+          row.checkbox.addEventListener("change", () => {
+            state.disabledRadarTypes = row?.checkbox.checked
+              ? state.disabledRadarTypes.filter((type) => type !== option.type)
+              : [...state.disabledRadarTypes, option.type];
+          });
+          radarRows.set(option.type, row);
+          radarList.appendChild(row.root);
+        }
+
+        row.checkbox.checked = !state.disabledRadarTypes.includes(option.type);
+        if (option.type === "fixedRadar") {
+          row.meta.textContent =
+            `${input.alliedCities.length + input.alliedSpawnZones.length} fixed sources`;
+          continue;
+        }
+
+        const activeDetectors = input.alliedPlatforms.filter(
+          (platform) =>
+            platform.platformClass === option.type &&
+            isPlatformDeployed(platform) &&
+            (platform.role === "recon" || platform.sensors.sensorType === "radar"),
+        ).length;
+        const storedDetectors = input.alliedPlatforms.filter(
+          (platform) =>
+            platform.platformClass === option.type &&
+            isPlatformStored(platform) &&
+            (platform.role === "recon" || platform.sensors.sensorType === "radar"),
+        ).length;
+        row.meta.textContent =
+          `${activeDetectors} active detector${activeDetectors === 1 ? "" : "s"} | ` +
+          `${storedDetectors} stored`;
       }
 
       summaryList.replaceChildren();

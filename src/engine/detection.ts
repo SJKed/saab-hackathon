@@ -17,6 +17,11 @@ import {
   pixelToWorldDistance,
   worldToPixelDistance,
 } from "../models/distance";
+import {
+  isRadarDisabledForType,
+  type DebugSettings,
+  type RadarDetectorType,
+} from "../models/debug";
 import { getSensorEnvelope } from "./intercept";
 
 export type DetectionSourceKind = "fixed-radar" | "platform-sensor";
@@ -73,10 +78,23 @@ function getFixedRadarEnvelope(enemyPlatform: MobilePlatform): number {
   return fixedRadarProfile.sensorRange * targetSignatureModifier * trackingModifier;
 }
 
-function isEligibleAirborneDetector(platform: MobilePlatform): boolean {
+function getPlatformRadarDetectorType(
+  platform: MobilePlatform,
+): RadarDetectorType {
+  return platform.platformClass;
+}
+
+function isEligibleAirborneDetector(
+  platform: MobilePlatform,
+  debugSettings: DebugSettings,
+): boolean {
   return (
     platform.team === "allied" &&
     isPlatformDeployed(platform) &&
+    !isRadarDisabledForType(
+      debugSettings,
+      getPlatformRadarDetectorType(platform),
+    ) &&
     (platform.role === "recon" || platform.sensors.sensorType === "radar")
   );
 }
@@ -84,7 +102,12 @@ function isEligibleAirborneDetector(platform: MobilePlatform): boolean {
 function getFixedRadarSources(
   alliedCities: AlliedCity[],
   alliedSpawnZones: AlliedSpawnZone[],
+  debugSettings: DebugSettings,
 ): DetectionSource[] {
+  if (isRadarDisabledForType(debugSettings, "fixedRadar")) {
+    return [];
+  }
+
   return [
     ...alliedCities.map((city) => ({
         id: `fixed-radar:${city.id}`,
@@ -105,21 +128,29 @@ function getFixedRadarSources(
 
 function getPlatformSensorSources(
   alliedPlatforms: MobilePlatform[],
+  debugSettings: DebugSettings,
 ): DetectionSource[] {
-  return alliedPlatforms.filter(isEligibleAirborneDetector).map((platform) => ({
-    id: `platform-sensor:${platform.id}`,
-    name: `${getPlatformDisplayName(platform)} ${platform.sensors.sensorType}`,
-    kind: "platform-sensor",
-    position: cloneVector(platform.position),
-    sensorRangeWorld: platform.sensors.sensorRange,
-  }));
+  return alliedPlatforms
+    .filter((platform) => isEligibleAirborneDetector(platform, debugSettings))
+    .map((platform) => ({
+      id: `platform-sensor:${platform.id}`,
+      name: `${getPlatformDisplayName(platform)} ${platform.sensors.sensorType}`,
+      kind: "platform-sensor",
+      position: cloneVector(platform.position),
+      sensorRangeWorld: platform.sensors.sensorRange,
+    }));
 }
 
 function detectWithFixedRadar(
   enemyPlatform: MobilePlatform,
   alliedCities: AlliedCity[],
   alliedSpawnZones: AlliedSpawnZone[],
+  debugSettings: DebugSettings,
 ): string | undefined {
+  if (isRadarDisabledForType(debugSettings, "fixedRadar")) {
+    return undefined;
+  }
+
   const targetType = getPlatformTargetType(enemyPlatform);
   if (!fixedRadarCanSenseTarget(targetType)) {
     return undefined;
@@ -140,12 +171,13 @@ function detectWithFixedRadar(
 function detectWithPlatformSensor(
   enemyPlatform: MobilePlatform,
   alliedPlatforms: MobilePlatform[],
+  debugSettings: DebugSettings,
 ): string | undefined {
   const targetType = getPlatformTargetType(enemyPlatform);
 
   for (const alliedPlatform of alliedPlatforms) {
     if (
-      !isEligibleAirborneDetector(alliedPlatform) ||
+      !isEligibleAirborneDetector(alliedPlatform, debugSettings) ||
       !platformCanSenseTarget(alliedPlatform, targetType)
     ) {
       continue;
@@ -181,6 +213,7 @@ export function calculateDetectionState(input: {
   enemyPlatforms: MobilePlatform[];
   previousState: DetectionState;
   tick: number;
+  debugSettings: DebugSettings;
 }): DetectionState {
   const detectedEnemyIds: string[] = [];
   const previousContactsById = new Map(
@@ -201,7 +234,13 @@ export function calculateDetectionState(input: {
         enemyPlatform,
         input.alliedCities,
         input.alliedSpawnZones,
-      ) ?? detectWithPlatformSensor(enemyPlatform, input.alliedPlatforms);
+        input.debugSettings,
+      ) ??
+      detectWithPlatformSensor(
+        enemyPlatform,
+        input.alliedPlatforms,
+        input.debugSettings,
+      );
 
     if (detectedBy) {
       detectedEnemyIds.push(enemyPlatform.id);
@@ -233,8 +272,12 @@ export function calculateDetectionState(input: {
     detectedEnemyIds,
     lastKnownEnemyContacts: [...nextContactsById.values()],
     detectionSources: [
-      ...getFixedRadarSources(input.alliedCities, input.alliedSpawnZones),
-      ...getPlatformSensorSources(input.alliedPlatforms),
+      ...getFixedRadarSources(
+        input.alliedCities,
+        input.alliedSpawnZones,
+        input.debugSettings,
+      ),
+      ...getPlatformSensorSources(input.alliedPlatforms, input.debugSettings),
     ],
   };
 }

@@ -9,7 +9,10 @@ import type {
   TrainingDeployRequest,
 } from "../models/training";
 import {
+  canDroneSacrificeTarget,
   getPlatformDisplayName,
+  getPlatformTargetType,
+  isReconPlatform,
   isPlatformDeployed,
   isPlatformStored,
 } from "../models/platform-utils";
@@ -25,6 +28,7 @@ type TrainingPanelApi = {
     operatorAssignments: ResourceAssignment[];
     advisorAssignments: ResourceAssignment[];
     feedbackMessages: string[];
+    hoverPointWorld: { x: number; y: number } | null;
   }) => void;
   consumeDeployRequest: () => TrainingDeployRequest | undefined;
   consumeRecallRequest: () => string | undefined;
@@ -129,6 +133,8 @@ function createListCard(text: string, tone: "info" | "warning" | "success" = "in
 export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   let pendingDeployRequest: TrainingDeployRequest | undefined;
   let pendingRecallRequest: string | undefined;
+  let reconTargetPosition: { x: number; y: number } | null = null;
+  let latestHoverPointWorld: { x: number; y: number } | null = null;
   let isDragging = false;
   let isCollapsed = false;
   let expandedHeight = "min(50vh, 620px)";
@@ -225,9 +231,13 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   const recallRow = createSelectRow("Recall active platform");
   const recallButton = createButton("Recall Platform", "#3a2f1f");
 
-  const missionOptions: Array<{ value: "intercept" | "reinforce"; label: string }> = [
+  const missionOptions: Array<{
+    value: "intercept" | "reinforce" | "recon";
+    label: string;
+  }> = [
     { value: "intercept", label: "Intercept enemy" },
     { value: "reinforce", label: "Reinforce city" },
+    { value: "recon", label: "Recon loiter point" },
   ];
   for (const optionConfig of missionOptions) {
     const option = document.createElement("option");
@@ -240,6 +250,56 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   commandSection.appendChild(platformRow.row);
   commandSection.appendChild(missionRow.row);
   commandSection.appendChild(targetRow.row);
+
+  const reconPointRow = document.createElement("div");
+  setStyles(reconPointRow, {
+    display: "none",
+    flexDirection: "column",
+    gap: "6px",
+  });
+  const reconPointLabel = document.createElement("label");
+  reconPointLabel.textContent = "Recon point";
+  setStyles(reconPointLabel, {
+    color: "#e0e0e0",
+    fontSize: "12px",
+  });
+  const reconPointInputs = document.createElement("div");
+  setStyles(reconPointInputs, {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr auto",
+    gap: "6px",
+  });
+  const reconPointXInput = document.createElement("input");
+  reconPointXInput.type = "number";
+  reconPointXInput.step = "1";
+  reconPointXInput.placeholder = "X";
+  const reconPointYInput = document.createElement("input");
+  reconPointYInput.type = "number";
+  reconPointYInput.step = "1";
+  reconPointYInput.placeholder = "Y";
+  for (const input of [reconPointXInput, reconPointYInput]) {
+    setStyles(input, {
+      padding: "7px 8px",
+      background: "#10242a",
+      color: "#f5f5f5",
+      border: "1px solid rgba(255, 255, 255, 0.2)",
+      borderRadius: "6px",
+    });
+  }
+  const useHoverButton = createButton("Use hover", "#1d2432");
+  const reconPointHint = document.createElement("div");
+  setStyles(reconPointHint, {
+    color: "#8fa8b1",
+    fontSize: "11px",
+    lineHeight: "1.3",
+  });
+  reconPointInputs.appendChild(reconPointXInput);
+  reconPointInputs.appendChild(reconPointYInput);
+  reconPointInputs.appendChild(useHoverButton);
+  reconPointRow.appendChild(reconPointLabel);
+  reconPointRow.appendChild(reconPointInputs);
+  reconPointRow.appendChild(reconPointHint);
+  commandSection.appendChild(reconPointRow);
   commandSection.appendChild(deployButton);
   commandSection.appendChild(recallRow.row);
   commandSection.appendChild(recallButton);
@@ -334,13 +394,65 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
     }
   }
 
-  deployButton.addEventListener("click", () => {
-    if (!baseRow.select.value || !platformRow.select.value || !targetRow.select.value) {
+  function syncReconPointInputs(): void {
+    reconPointXInput.value =
+      reconTargetPosition === null ? "" : String(Math.round(reconTargetPosition.x));
+    reconPointYInput.value =
+      reconTargetPosition === null ? "" : String(Math.round(reconTargetPosition.y));
+  }
+
+  function updateReconTargetPositionFromInputs(): void {
+    const x = Number(reconPointXInput.value);
+    const y = Number(reconPointYInput.value);
+    reconTargetPosition =
+      Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    if (missionRow.select.value === "recon") {
+      deployButton.disabled =
+        platformRow.select.options.length === 0 || reconTargetPosition === null;
+    }
+  }
+
+  reconPointXInput.addEventListener("input", updateReconTargetPositionFromInputs);
+  reconPointYInput.addEventListener("input", updateReconTargetPositionFromInputs);
+  useHoverButton.addEventListener("click", () => {
+    if (!latestHoverPointWorld) {
       return;
     }
+
+    reconTargetPosition = {
+      x: Math.round(latestHoverPointWorld.x),
+      y: Math.round(latestHoverPointWorld.y),
+    };
+    syncReconPointInputs();
+    deployButton.disabled = platformRow.select.options.length === 0;
+  });
+
+  deployButton.addEventListener("click", () => {
+    if (!baseRow.select.value || !platformRow.select.value) {
+      return;
+    }
+    const mission = missionRow.select.value as "intercept" | "reinforce" | "recon";
+    if (mission === "recon") {
+      updateReconTargetPositionFromInputs();
+      if (!reconTargetPosition) {
+        return;
+      }
+
+      pendingDeployRequest = {
+        resourceId: platformRow.select.value,
+        mission: "recon",
+        targetPosition: { ...reconTargetPosition },
+      };
+      return;
+    }
+
+    if (!targetRow.select.value) {
+      return;
+    }
+
     pendingDeployRequest = {
       resourceId: platformRow.select.value,
-      mission: missionRow.select.value as "intercept" | "reinforce",
+      mission,
       targetId: targetRow.select.value,
     };
   });
@@ -426,10 +538,11 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
       return request;
     },
     update: (input) => {
+      latestHoverPointWorld = input.hoverPointWorld;
       modeSummary.textContent =
         input.commandMode === "training"
           ? "Training mode active: allied deployments come from your commands, while AI recommendations remain advisory."
-          : "AI auto mode active: the recommendation engine currently owns allied deployments.";
+          : "AI auto mode active: normal combat tasking stays AI-controlled, but recon drones can still be manually positioned.";
 
       const baseOptions = input.alliedSpawnZones.map((base) => ({
         value: base.id,
@@ -437,31 +550,85 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
       }));
       replaceSelectOptions(baseRow.select, baseOptions);
 
+      replaceSelectOptions(
+        missionRow.select,
+        (input.commandMode === "training" ? missionOptions : [missionOptions[2]]).map(
+          (option) => ({
+            value: option.value,
+            label: option.label,
+          }),
+        ),
+      );
+
+      const selectedMission = missionRow.select.value as
+        | "intercept"
+        | "reinforce"
+        | "recon";
       const selectedBaseId = baseRow.select.value;
+      const deployedEnemyPlatforms = input.enemyPlatforms.filter(isPlatformDeployed);
       const storedPlatforms = input.alliedPlatforms.filter(
         (platform) => platform.originId === selectedBaseId && isPlatformStored(platform),
       );
       replaceSelectOptions(
         platformRow.select,
-        storedPlatforms.map((platform) => ({
-          value: platform.id,
-          label: getPlatformDisplayName(platform),
-        })),
+        storedPlatforms
+          .filter((platform) => {
+            if (selectedMission === "recon") {
+              return isReconPlatform(platform);
+            }
+
+            if (selectedMission === "intercept" && isReconPlatform(platform)) {
+              return deployedEnemyPlatforms.some((enemyPlatform) =>
+                canDroneSacrificeTarget(
+                  platform,
+                  getPlatformTargetType(enemyPlatform),
+                ),
+              );
+            }
+
+            return true;
+          })
+          .map((platform) => ({
+            value: platform.id,
+            label: getPlatformDisplayName(platform),
+          })),
+      );
+      const selectedPlatform = storedPlatforms.find(
+        (platform) => platform.id === platformRow.select.value,
       );
 
       const targetOptions =
-        missionRow.select.value === "intercept"
-          ? input.enemyPlatforms
-              .filter(isPlatformDeployed)
+        selectedMission === "intercept"
+          ? deployedEnemyPlatforms
+              .filter(
+                (platform) =>
+                  !selectedPlatform ||
+                  !isReconPlatform(selectedPlatform) ||
+                  canDroneSacrificeTarget(
+                    selectedPlatform,
+                    getPlatformTargetType(platform),
+                  ),
+              )
               .map((platform) => ({
-              value: platform.id,
-              label: `${getPlatformDisplayName(platform)} (${platform.status})`,
-            }))
+                value: platform.id,
+                label: `${getPlatformDisplayName(platform)} (${platform.status})`,
+              }))
           : input.alliedCities.map((city) => ({
               value: city.id,
               label: city.name ?? city.id,
             }));
-      replaceSelectOptions(targetRow.select, targetOptions);
+      if (selectedMission !== "recon") {
+        replaceSelectOptions(targetRow.select, targetOptions);
+      }
+
+      targetRow.row.style.display = selectedMission === "recon" ? "none" : "flex";
+      reconPointRow.style.display = selectedMission === "recon" ? "flex" : "none";
+      reconPointHint.textContent = latestHoverPointWorld
+        ? `Latest hover: (${Math.round(latestHoverPointWorld.x)}, ${Math.round(
+            latestHoverPointWorld.y,
+          )})`
+        : "Move the mouse over the map, then use Use hover, or enter coordinates manually.";
+      syncReconPointInputs();
 
       const recallablePlatforms = input.alliedPlatforms.filter(
         (platform) =>
@@ -474,22 +641,31 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
         recallRow.select,
         recallablePlatforms.map((platform) => ({
           value: platform.id,
-          label: getPlatformDisplayName(platform),
+          label: `${getPlatformDisplayName(platform)}${
+            isReconPlatform(platform) ? " (recon)" : ""
+          }`,
         })),
       );
 
-      const disabled = input.commandMode !== "training";
+      const deploymentDisabled = platformRow.select.options.length === 0;
       for (const control of [
         baseRow.select,
         platformRow.select,
         missionRow.select,
-        targetRow.select,
         recallRow.select,
-        deployButton,
         recallButton,
       ]) {
-        control.disabled = disabled;
+        control.disabled = false;
       }
+      targetRow.select.disabled = selectedMission === "recon";
+      reconPointXInput.disabled = selectedMission !== "recon";
+      reconPointYInput.disabled = selectedMission !== "recon";
+      useHoverButton.disabled =
+        selectedMission !== "recon" || latestHoverPointWorld === null;
+      deployButton.disabled =
+        deploymentDisabled ||
+        (selectedMission === "recon" && reconTargetPosition === null) ||
+        (selectedMission === "intercept" && targetRow.select.options.length === 0);
 
       feedbackList.replaceChildren();
       const feedbackMessages =
@@ -498,7 +674,7 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
           : [
               input.commandMode === "training"
                 ? "Awaiting operator action. The AI advisor will flag urgent gaps and recommended intercepts."
-                : "Switch to Training mode to take direct control and receive decision coaching.",
+                : "AI auto mode is handling combat deployments. Recon drones can still be manually positioned from this panel.",
             ];
       for (const message of feedbackMessages.slice(0, 4)) {
         feedbackList.appendChild(
@@ -521,7 +697,13 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
         for (const assignment of input.advisorAssignments.slice(0, 3)) {
           recommendationList.appendChild(
             createListCard(
-              `${assignment.mission === "intercept" ? "Intercept" : "Reinforce"}: ` +
+              `${
+                assignment.mission === "intercept"
+                  ? "Intercept"
+                  : assignment.mission === "recon"
+                    ? "Recon"
+                    : "Reinforce"
+              }: ` +
                 `${assignment.resourceName} -> ${assignment.targetName}. ${assignment.reason}`,
               "warning",
             ),
@@ -535,7 +717,7 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
           createListCard(
             input.commandMode === "training"
               ? "No operator-issued commands are active."
-              : "Operator commands are inactive while AI auto mode is selected.",
+              : "No manual recon placements are active while AI auto mode is selected.",
           ),
         );
       } else {

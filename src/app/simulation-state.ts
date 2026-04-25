@@ -28,6 +28,7 @@ import type {
   EnemyBase,
   MobilePlatform,
 } from "../models/entity";
+import { defaultDebugSettings } from "../models/debug";
 import { clonePlatform } from "../models/platform-utils";
 import { createEnemyDeployments } from "../simulation/updater";
 import type { CombatVisualEffect } from "../ui/renderer";
@@ -147,6 +148,7 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     enemyPlatforms,
     previousState: createDetectionState(),
     tick: 0,
+    debugSettings: defaultDebugSettings,
   });
   const alliedPostureMemory = createTeamPostureMemory();
   const alliedPosture = applyPostureMemory(

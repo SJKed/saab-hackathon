@@ -31,6 +31,7 @@ type BaseDirectorState = {
   nextLaunchTick: number;
   launchesIssued: number;
   lastTargetCityId?: string;
+  recentTargetCityIds: string[];
 };
 
 type CityExposureBreakdown = {
@@ -74,6 +75,7 @@ export type EnemyDirectorSnapshot = {
 export type EnemyDirectorState = {
   baseStates: Record<string, BaseDirectorState>;
   postureMemory: TeamPostureMemory;
+  randomSeed: number;
   snapshot: EnemyDirectorSnapshot;
 };
 
@@ -86,6 +88,24 @@ const ticksPerSecond = 4;
 const initialLaunchTick = 4;
 const baseLaunchStaggerTicks = 6;
 const maxRecentLaunches = 6;
+const targetSelectionTopScoreWindow = 2.6;
+const targetSelectionCandidateLimit = 5;
+const targetSelectionScoreTemperature = 1.6;
+const recentTargetHistoryLimit = 3;
+
+function createInitialRandomSeed(): number {
+  return (
+    ((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0) || 1
+  );
+}
+
+function nextRandomValue(seed: number): { seed: number; value: number } {
+  const nextSeed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return {
+    seed: nextSeed,
+    value: nextSeed / 0x100000000,
+  };
+}
 
 function getAggressionProfileForTier(
   tier: EnemyAggressionTier,
@@ -278,6 +298,7 @@ function getOrCreateBaseState(
     state.baseStates[baseId] ?? {
       nextLaunchTick: initialLaunchTick + (baseIndex * baseLaunchStaggerTicks),
       launchesIssued: 0,
+      recentTargetCityIds: [],
     }
   );
 }
@@ -329,9 +350,12 @@ function selectTargetCity(
   baseState: BaseDirectorState,
   alliedCities: AlliedCity[],
   cityExposureScores: CityExposureBreakdown[],
+  randomValue: number,
 ): CityExposureBreakdown | undefined {
-  let bestCity: CityExposureBreakdown | undefined;
-  let bestScore = Number.NEGATIVE_INFINITY;
+  const scoredCities: Array<{
+    cityExposure: CityExposureBreakdown;
+    score: number;
+  }> = [];
 
   for (const cityExposure of cityExposureScores) {
     const city = alliedCities.find((candidate) => candidate.id === cityExposure.cityId);
@@ -340,22 +364,68 @@ function selectTargetCity(
       : Number.POSITIVE_INFINITY;
     const proximityBias =
       Math.max(0.22, 2 - cityDistance / targetSelectionProximityScale);
-    const continuityBonus =
-      baseState.lastTargetCityId === cityExposure.cityId ? 0.18 : 0;
+    const recentTargetIndex = baseState.recentTargetCityIds.indexOf(
+      cityExposure.cityId,
+    );
+    const repeatPenalty =
+      recentTargetIndex < 0
+        ? 0
+        : recentTargetIndex === 0
+          ? 1.35
+          : recentTargetIndex === 1
+            ? 0.95
+            : 0.55;
     const saturationPenalty = cityExposure.activeThreatCount * 0.35;
     const score =
       cityExposure.exposure * 1.28 +
       proximityBias +
-      continuityBonus -
+      (baseState.lastTargetCityId === cityExposure.cityId ? 0.22 : 0) -
+      repeatPenalty -
       saturationPenalty;
+    scoredCities.push({
+      cityExposure,
+      score,
+    });
+  }
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestCity = cityExposure;
+  if (scoredCities.length === 0) {
+    return undefined;
+  }
+
+  scoredCities.sort((left, right) => right.score - left.score);
+  const topScore = scoredCities[0].score;
+  const topCandidates = scoredCities
+    .filter(
+      (candidate) =>
+        candidate.score >= topScore - targetSelectionTopScoreWindow,
+    )
+    .slice(0, targetSelectionCandidateLimit);
+  const totalWeight = topCandidates.reduce(
+    (sum, candidate) =>
+      sum +
+      Math.max(
+        0.12,
+        Math.exp(
+          (candidate.score - topScore) / targetSelectionScoreTemperature,
+        ),
+      ),
+    0,
+  );
+
+  let remainingWeight = randomValue * totalWeight;
+  for (const candidate of topCandidates) {
+    remainingWeight -= Math.max(
+      0.12,
+      Math.exp(
+        (candidate.score - topScore) / targetSelectionScoreTemperature,
+      ),
+    );
+    if (remainingWeight <= 0) {
+      return candidate.cityExposure;
     }
   }
 
-  return bestCity;
+  return topCandidates[0]?.cityExposure;
 }
 
 function selectPlatformsForWave(
@@ -484,6 +554,7 @@ export function createEnemyDirectorState(
       {
         nextLaunchTick: initialLaunchTick + (baseIndex * baseLaunchStaggerTicks),
         launchesIssued: 0,
+        recentTargetCityIds: [],
       },
     ]),
   );
@@ -492,6 +563,7 @@ export function createEnemyDirectorState(
   return {
     baseStates,
     postureMemory,
+    randomSeed: createInitialRandomSeed(),
     snapshot: {
       aggressionTier: "opening",
       aggressionLabel: "Opening Probe",
@@ -557,6 +629,7 @@ export function coordinateEnemyDeployments(
   );
   const updatedBaseStates: Record<string, BaseDirectorState> = { ...state.baseStates };
   let updatedEnemyPlatforms = enemyPlatforms.map(clonePlatform);
+  let randomSeed = state.randomSeed;
   const effectiveActiveEnemyCap = Math.min(
     profile.activeEnemyCap,
     Math.max(
@@ -600,11 +673,14 @@ export function coordinateEnemyDeployments(
       continue;
     }
 
+    const randomSelection = nextRandomValue(randomSeed);
+    randomSeed = randomSelection.seed;
     const targetCityExposure = selectTargetCity(
       enemyBase,
       baseState,
       alliedCities,
       cityExposureScores,
+      randomSelection.value,
     );
     if (!targetCityExposure) {
       updatedBaseStates[enemyBase.id] = baseState;
@@ -678,6 +754,12 @@ export function coordinateEnemyDeployments(
         tick + getNextLaunchIntervalTicks(profile, baseIndex, selectedPlatforms.length),
       launchesIssued: baseState.launchesIssued + selectedPlatforms.length,
       lastTargetCityId: targetCityExposure.cityId,
+      recentTargetCityIds: [
+        targetCityExposure.cityId,
+        ...baseState.recentTargetCityIds.filter(
+          (cityId) => cityId !== targetCityExposure.cityId,
+        ),
+      ].slice(0, recentTargetHistoryLimit),
     };
     recentLaunches.unshift(
       `${enemyBase.name ?? enemyBase.id} launched ${getWaveSummary(selectedPlatforms)} toward ` +
@@ -692,9 +774,10 @@ export function coordinateEnemyDeployments(
 
   return {
     enemyPlatforms: updatedEnemyPlatforms,
-    directorState: {
+      directorState: {
         baseStates: updatedBaseStates,
         postureMemory: posture.memory,
+        randomSeed,
         snapshot: {
           aggressionTier: profile.tier,
           aggressionLabel: profile.label,

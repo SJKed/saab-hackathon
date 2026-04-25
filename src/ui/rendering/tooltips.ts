@@ -127,7 +127,13 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Type: Allied ${platform.platformClass} (${platform.role})`,
           `Status: ${platform.status} | Task: ${
             assignment
-              ? `${assignment.mission === "intercept" ? "Intercept" : "Reinforce"} ${assignment.targetName}`
+              ? `${
+                  assignment.mission === "intercept"
+                    ? "Intercept"
+                    : assignment.mission === "recon"
+                      ? "Recon"
+                      : "Reinforce"
+                } ${assignment.targetName}`
               : platform.status
           }`,
           `Combat Phase: ${platform.combatPhase ?? "none"}`,

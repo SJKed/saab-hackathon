@@ -52,6 +52,21 @@ export function isPlatformDeployed(platform: MobilePlatform): boolean {
   return !isPlatformDestroyed(platform) && !isPlatformStored(platform);
 }
 
+export function isReconPlatform(platform: MobilePlatform): boolean {
+  return (
+    platform.platformClass === "drone" &&
+    platform.role === "recon" &&
+    platform.weapons.length === 0
+  );
+}
+
+export function canDroneSacrificeTarget(
+  platform: MobilePlatform,
+  targetType: TargetType,
+): boolean {
+  return isReconPlatform(platform) && targetType === "ballisticMissile";
+}
+
 export function getWeaponShotInterval(weapon: Weapon): number {
   const fireInterval = weapon.rateOfFire > epsilon ? 1 / weapon.rateOfFire : 0;
   return Math.max(fireInterval, weapon.reloadTime);
@@ -73,6 +88,22 @@ export function getWeaponBlastRadius(weapon: Weapon): number {
   return weapon.blastRadius ?? 0;
 }
 
+function getWeaponThreatOpportunityCount(weapon: Weapon): number {
+  switch (weapon.weaponClass) {
+    case "terminalPayload":
+      return 1;
+    case "bomb":
+      return 2;
+    case "airToAirMissile":
+    case "surfaceToAirMissile":
+      return 2;
+    case "rapidFire":
+      return 3;
+    default:
+      return 1;
+  }
+}
+
 export function getWeaponsForTarget(
   platform: MobilePlatform,
   targetType: TargetType,
@@ -86,6 +117,30 @@ export function getWeaponsForTarget(
 
 export function hasUsablePayload(platform: MobilePlatform): boolean {
   return platform.weapons.some(hasUsableAmmo);
+}
+
+export function getEstimatedImmediateDamageAgainstTarget(
+  platform: MobilePlatform,
+  targetType: TargetType,
+): number {
+  return getWeaponsForTarget(platform, targetType).reduce((totalDamage, weapon) => {
+    const availableSalvos = Math.floor(
+      weapon.ammunition / Math.max(1, getUsableAmmoCost(weapon)),
+    );
+    if (availableSalvos <= 0) {
+      return totalDamage;
+    }
+
+    const usableSalvos = Math.min(
+      availableSalvos,
+      getWeaponThreatOpportunityCount(weapon),
+    );
+    const expectedDamagePerSalvo =
+      getWeaponPayloadDamage(weapon) *
+      Math.max(weapon.accuracy, weapon.probabilityOfKillBase ?? weapon.accuracy);
+
+    return totalDamage + usableSalvos * expectedDamagePerSalvo;
+  }, 0);
 }
 
 export function getPrimaryPayloadWeapon(
@@ -149,6 +204,10 @@ export function getPreferredCombatRange(
 
   const usableWeapons = getWeaponsForTarget(platform, targetType);
   if (usableWeapons.length === 0) {
+    if (canDroneSacrificeTarget(platform, targetType)) {
+      return pixelToWorldDistance(12);
+    }
+
     return platform.platformClass === "ballisticMissile"
       ? pixelToWorldDistance(12)
       : pixelToWorldDistance(32);

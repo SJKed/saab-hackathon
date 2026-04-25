@@ -1,26 +1,32 @@
 import type {
   AlliedCity,
   AlliedSpawnZone,
+  EnemyBase,
   MobilePlatform,
   PlatformClass,
+  Vector,
   Weapon,
 } from "../models/entity";
 import {
   distanceWorld,
   pixelRateToWorldRate,
   pixelToWorldDistance,
+  worldToPixelDistance,
 } from "../models/distance";
 import {
   isAlliedBaseDeploymentDisabled,
+  isRadarDisabledForType,
   type DebugSettings,
 } from "../models/debug";
 import { getMissionFuelBudgetSeconds } from "../models/platform-recovery";
 import {
+  canDroneSacrificeTarget,
   getPlatformDisplayName,
   getPrimaryPayloadWeapon,
   getPlatformTargetType,
   getWeaponPayloadDamage,
   hasUsableAmmo,
+  isReconPlatform,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
@@ -40,12 +46,13 @@ import {
   type ResponsePlannerSnapshot,
 } from "./planning";
 
-export type ResourceMission = "intercept" | "reinforce";
+export type ResourceMission = "intercept" | "reinforce" | "recon";
 
 export type ResourceAssignment = {
   mission: ResourceMission;
   targetId: string;
   targetName: string;
+  targetPosition?: Vector;
   resourceId: string;
   resourceName: string;
   distance: number;
@@ -70,12 +77,26 @@ type OriginReserve = {
   byClass: Record<PlatformClass, number>;
 };
 
+type ReconCandidate = {
+  id: string;
+  targetName: string;
+  targetPosition: Vector;
+  priorityScore: number;
+  reason: string;
+};
+
 const interceptFuelCommitmentBufferSeconds = 3;
 const reinforcementFuelCommitmentBufferSeconds = 6;
+const reconFuelCommitmentBufferSeconds = 10;
 const reinforcementDistancePenaltyScale = pixelToWorldDistance(70);
 const minimumTravelRate = pixelToWorldDistance(1);
 const interceptSensorScoreScale = pixelToWorldDistance(50);
 const reinforcementSensorScoreScale = pixelToWorldDistance(65);
+const fixedRadarCoverageWorld = pixelToWorldDistance(300);
+const reconCoverageGapScoreScale = pixelToWorldDistance(90);
+const reconPointSpacingWorld = pixelToWorldDistance(160);
+const reconCorridorLeadFraction = 0.44;
+const reconDefensiveOffsetRaw = worldToPixelDistance(fixedRadarCoverageWorld * 0.88);
 
 function isPlatformAvailable(
   platform: MobilePlatform,
@@ -258,15 +279,48 @@ function getCityById(cities: AlliedCity[], cityId: string | undefined): AlliedCi
   return cities.find((city) => city.id === cityId);
 }
 
+function hasVisibleHighPriorityAirThreats(
+  enemyPlatforms: MobilePlatform[],
+): boolean {
+  return enemyPlatforms.some(
+    (enemyPlatform) =>
+      isPlatformDeployed(enemyPlatform) &&
+      (enemyPlatform.platformClass === "fighterJet" ||
+        enemyPlatform.platformClass === "ballisticMissile"),
+  );
+}
+
+function getInterceptTargetClassPriority(
+  enemyPlatform: MobilePlatform,
+  enemyPlatforms: MobilePlatform[],
+): number {
+  switch (enemyPlatform.platformClass) {
+    case "fighterJet":
+      return 4.6;
+    case "ballisticMissile":
+      return 2.25;
+    case "drone":
+      return hasVisibleHighPriorityAirThreats(enemyPlatforms) ? 0.18 : 1.35;
+    default:
+      return 1;
+  }
+}
+
 function getInterceptPriority(
   enemyPlatform: MobilePlatform,
   cities: AlliedCity[],
+  enemyPlatforms: MobilePlatform[],
 ): number {
   const targetCity = getCityById(cities, enemyPlatform.targetId);
   const targetValue = targetCity?.value ?? 5;
   const payloadThreat = enemyPlatform.platformClass === "ballisticMissile" ? 1.35 : 1;
 
-  return enemyPlatform.threatLevel * targetValue * payloadThreat;
+  return (
+    enemyPlatform.threatLevel *
+    targetValue *
+    payloadThreat *
+    getInterceptTargetClassPriority(enemyPlatform, enemyPlatforms)
+  );
 }
 
 function getReinforcementPriority(city: AlliedCity): number {
@@ -334,6 +388,26 @@ function getTerminalImpactEffectiveness(
   );
 }
 
+function getDroneSacrificeEffectiveness(
+  alliedPlatform: MobilePlatform,
+  enemyPlatform: MobilePlatform,
+): number {
+  if (!canDroneSacrificeTarget(alliedPlatform, getPlatformTargetType(enemyPlatform))) {
+    return 0;
+  }
+
+  const trackingModifier = 0.78 + alliedPlatform.sensors.trackingQuality * 0.28;
+  const interceptModifier =
+    1.1 - (enemyPlatform.interceptDifficulty ?? 0) * 0.3;
+  const durabilityModifier =
+    0.9 + Math.min(0.2, alliedPlatform.combat.durability / Math.max(1, alliedPlatform.combat.maxDurability) * 0.2);
+
+  return Math.max(
+    0.55,
+    Math.min(1.18, trackingModifier * interceptModifier * durabilityModifier),
+  );
+}
+
 function selectBestWeapon(
   alliedPlatform: MobilePlatform,
   enemyPlatform: MobilePlatform,
@@ -383,6 +457,354 @@ function canReinforce(
   );
 }
 
+function isAvailableReconPlatform(
+  platform: MobilePlatform,
+  debugSettings: DebugSettings,
+): boolean {
+  return (
+    isReconPlatform(platform) &&
+    isPlatformAvailable(platform, debugSettings) &&
+    !isRadarDisabledForType(debugSettings, "drone")
+  );
+}
+
+function getCoverageGapAtPoint(
+  point: Vector,
+  alliedCities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
+  alliedPlatforms: MobilePlatform[],
+  debugSettings: DebugSettings,
+  ignoredPlatformId?: string,
+): number {
+  let bestCoverageMargin = Number.NEGATIVE_INFINITY;
+
+  if (!isRadarDisabledForType(debugSettings, "fixedRadar")) {
+    for (const objective of [...alliedCities, ...alliedSpawnZones]) {
+      bestCoverageMargin = Math.max(
+        bestCoverageMargin,
+        fixedRadarCoverageWorld - distanceWorld(point, objective.position),
+      );
+    }
+  }
+
+  for (const platform of alliedPlatforms) {
+    if (
+      platform.id === ignoredPlatformId ||
+      platform.team !== "allied" ||
+      !isPlatformDeployed(platform) ||
+      isRadarDisabledForType(debugSettings, platform.platformClass)
+    ) {
+      continue;
+    }
+
+    if (!(platform.role === "recon" || platform.sensors.sensorType === "radar")) {
+      continue;
+    }
+
+    bestCoverageMargin = Math.max(
+      bestCoverageMargin,
+      platform.sensors.sensorRange - distanceWorld(point, platform.position),
+    );
+  }
+
+  return Math.max(0, -bestCoverageMargin);
+}
+
+function interpolatePoint(a: Vector, b: Vector, fraction: number): Vector {
+  return {
+    x: a.x + (b.x - a.x) * fraction,
+    y: a.y + (b.y - a.y) * fraction,
+  };
+}
+
+function projectPointTowards(origin: Vector, target: Vector, rawDistance: number): Vector {
+  const dx = target.x - origin.x;
+  const dy = target.y - origin.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 0.0001) {
+    return { ...origin };
+  }
+
+  const scale = rawDistance / distance;
+  return {
+    x: origin.x + dx * scale,
+    y: origin.y + dy * scale,
+  };
+}
+
+function buildReconCandidates(
+  cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
+  alliedPlatforms: MobilePlatform[],
+  enemyBases: EnemyBase[],
+  postureSnapshot: AlliedForcePostureSnapshot,
+  debugSettings: DebugSettings,
+): ReconCandidate[] {
+  if (isRadarDisabledForType(debugSettings, "drone")) {
+    return [];
+  }
+
+  const cityPostureById = new Map(
+    postureSnapshot.cityStates.map((cityState) => [cityState.cityId, cityState]),
+  );
+  const candidates: ReconCandidate[] = [];
+
+  for (const city of cities) {
+    const cityPosture = cityPostureById.get(city.id);
+    for (const enemyBase of enemyBases) {
+      const corridorPoint = interpolatePoint(
+        city.position,
+        enemyBase.position,
+        reconCorridorLeadFraction,
+      );
+      const coverageGap = getCoverageGapAtPoint(
+        corridorPoint,
+        cities,
+        alliedSpawnZones,
+        alliedPlatforms,
+        debugSettings,
+      );
+      if (coverageGap <= pixelToWorldDistance(10)) {
+        continue;
+      }
+
+      const priorityScore =
+        coverageGap / reconCoverageGapScoreScale +
+        city.value * 0.6 +
+        city.threat * 140 +
+        (cityPosture?.inboundPressure ?? 0) * 2.2 +
+        (cityPosture?.unmetCoverage ?? 0) * 1.6;
+      candidates.push({
+        id: `recon-corridor:${enemyBase.id}:${city.id}`,
+        targetName: `Corridor ${enemyBase.name ?? enemyBase.id} -> ${city.name ?? city.id}`,
+        targetPosition: corridorPoint,
+        priorityScore,
+        reason:
+          `This forward scouting point sits on the ${enemyBase.name ?? enemyBase.id} approach toward ` +
+          `${city.name ?? city.id}, where current radar coverage is thin.`,
+      });
+    }
+  }
+
+  for (const city of cities) {
+    const cityPosture = cityPostureById.get(city.id);
+    const nearestEnemyBase = enemyBases.reduce<EnemyBase | undefined>(
+      (bestBase, enemyBase) => {
+        if (!bestBase) {
+          return enemyBase;
+        }
+
+        return distanceWorld(city.position, enemyBase.position) <
+          distanceWorld(city.position, bestBase.position)
+          ? enemyBase
+          : bestBase;
+      },
+      undefined,
+    );
+    if (!nearestEnemyBase) {
+      continue;
+    }
+
+    const fallbackPoint = projectPointTowards(
+      city.position,
+      nearestEnemyBase.position,
+      reconDefensiveOffsetRaw,
+    );
+    const coverageGap = getCoverageGapAtPoint(
+      fallbackPoint,
+      cities,
+      alliedSpawnZones,
+      alliedPlatforms,
+      debugSettings,
+    );
+    if (coverageGap <= pixelToWorldDistance(12)) {
+      continue;
+    }
+
+    candidates.push({
+      id: `recon-defensive:${city.id}`,
+      targetName: `${city.name ?? city.id} forward blind spot`,
+      targetPosition: fallbackPoint,
+      priorityScore:
+        coverageGap / reconCoverageGapScoreScale +
+        city.value * 0.42 +
+        city.threat * 80 +
+        (cityPosture?.unmetCoverage ?? 0) * 1.2,
+      reason:
+        `This point extends visibility beyond the local fixed-radar envelope protecting ${city.name ?? city.id}.`,
+    });
+  }
+
+  for (const platform of alliedPlatforms) {
+    if (!isReconPlatform(platform) || !isPlatformDeployed(platform)) {
+      continue;
+    }
+
+    const nearestCity = cities.reduce<AlliedCity | undefined>((bestCity, city) => {
+      if (!bestCity) {
+        return city;
+      }
+
+      return distanceWorld(platform.position, city.position) <
+        distanceWorld(platform.position, bestCity.position)
+        ? city
+        : bestCity;
+    }, undefined);
+    if (!nearestCity) {
+      continue;
+    }
+
+    const nearestCityPosture = cityPostureById.get(nearestCity.id);
+    const coverageGapWithoutSelf = getCoverageGapAtPoint(
+      platform.position,
+      cities,
+      alliedSpawnZones,
+      alliedPlatforms,
+      debugSettings,
+      platform.id,
+    );
+    candidates.push({
+      id: `recon-station:${platform.id}`,
+      targetName: `${getPlatformDisplayName(platform)} station`,
+      targetPosition: { ...platform.position },
+      priorityScore:
+        coverageGapWithoutSelf / reconCoverageGapScoreScale +
+        nearestCity.value * 0.5 +
+        nearestCity.threat * 95 +
+        (nearestCityPosture?.inboundPressure ?? 0) * 1.7 +
+        2.4,
+      reason:
+        `${getPlatformDisplayName(platform)} is already holding a useful forward sensor station and should maintain visibility there.`,
+    });
+  }
+
+  const selectedCandidates: ReconCandidate[] = [];
+  for (const candidate of candidates.sort((left, right) => right.priorityScore - left.priorityScore)) {
+    if (
+      selectedCandidates.some(
+        (existingCandidate) =>
+          distanceWorld(existingCandidate.targetPosition, candidate.targetPosition) <
+          reconPointSpacingWorld,
+      )
+    ) {
+      continue;
+    }
+
+    selectedCandidates.push(candidate);
+  }
+
+  return selectedCandidates.slice(0, 8);
+}
+
+function allocateReconAssignments(
+  cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
+  alliedPlatforms: MobilePlatform[],
+  enemyBases: EnemyBase[],
+  postureSnapshot: AlliedForcePostureSnapshot,
+  debugSettings: DebugSettings,
+): ResourceAssignment[] {
+  const candidates = buildReconCandidates(
+    cities,
+    alliedSpawnZones,
+    alliedPlatforms,
+    enemyBases,
+    postureSnapshot,
+    debugSettings,
+  );
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const storedReserveByOrigin = getStoredReserveByOrigin(alliedPlatforms);
+  const availableReconPlatforms = alliedPlatforms.filter((platform) =>
+    isAvailableReconPlatform(platform, debugSettings),
+  );
+  const assignments: ResourceAssignment[] = [];
+  const usedPlatformIds = new Set<string>();
+  const usedStoredOrigins = new Set<string>();
+
+  for (const candidate of candidates) {
+    let bestPlatform: MobilePlatform | undefined;
+    let bestTravelTime = Number.POSITIVE_INFINITY;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const platform of availableReconPlatforms) {
+      if (usedPlatformIds.has(platform.id)) {
+        continue;
+      }
+
+      if (
+        isPlatformStored(platform) &&
+        platform.originId &&
+        usedStoredOrigins.has(platform.originId)
+      ) {
+        continue;
+      }
+
+      const distance = distanceWorld(platform.position, candidate.targetPosition);
+      const travelTime =
+        distance /
+        Math.max(
+          minimumTravelRate,
+          pixelRateToWorldRate(getPlatformTransitSpeed(platform)),
+        );
+      if (
+        getMissionFuelBudgetSeconds(platform, alliedSpawnZones, []) <=
+        travelTime + reconFuelCommitmentBufferSeconds
+      ) {
+        continue;
+      }
+
+      const reservePenalty = getReservePenalty(platform, storedReserveByOrigin) * 0.35;
+      const persistenceBonus =
+        isPlatformDeployed(platform) &&
+        distance <= pixelToWorldDistance(24)
+          ? 1.8
+          : 0;
+      const score =
+        candidate.priorityScore +
+        platform.sensors.sensorRange / reinforcementSensorScoreScale +
+        persistenceBonus -
+        travelTime * 0.9 -
+        reservePenalty;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTravelTime = travelTime;
+        bestPlatform = platform;
+      }
+    }
+
+    if (!bestPlatform) {
+      continue;
+    }
+
+    usedPlatformIds.add(bestPlatform.id);
+    if (isPlatformStored(bestPlatform) && bestPlatform.originId) {
+      usedStoredOrigins.add(bestPlatform.originId);
+    }
+
+    assignments.push({
+      mission: "recon",
+      targetId: candidate.id,
+      targetName: candidate.targetName,
+      targetPosition: candidate.targetPosition,
+      resourceId: bestPlatform.id,
+      resourceName: getPlatformDisplayName(bestPlatform),
+      distance: distanceWorld(bestPlatform.position, candidate.targetPosition),
+      threatScore: Math.max(0, candidate.priorityScore / 10),
+      priorityScore: candidate.priorityScore,
+      interceptTimeSeconds: bestTravelTime,
+      expectedEffectiveness: candidate.priorityScore,
+      reason:
+        `${candidate.reason} ${getPlatformDisplayName(bestPlatform)} has the best available sensor reach and travel time for this coverage gap.`,
+    });
+  }
+
+  return assignments;
+}
+
 function allocateHeuristicResources(
   cities: AlliedCity[],
   alliedSpawnZones: AlliedSpawnZone[],
@@ -397,12 +819,21 @@ function allocateHeuristicResources(
   const activeEnemyPlatforms = enemyPlatforms.filter((enemyPlatform) =>
     isPlatformDeployed(enemyPlatform),
   );
+  const hasVisibleJetsOrMissiles = hasVisibleHighPriorityAirThreats(
+    activeEnemyPlatforms,
+  );
   const sortedEnemyPlatforms = [...activeEnemyPlatforms].sort(
-    (a, b) => getInterceptPriority(b, cities) - getInterceptPriority(a, cities),
+    (a, b) =>
+      getInterceptPriority(b, cities, activeEnemyPlatforms) -
+      getInterceptPriority(a, cities, activeEnemyPlatforms),
   );
 
   for (const enemyPlatform of sortedEnemyPlatforms) {
-    const priorityScore = getInterceptPriority(enemyPlatform, cities);
+    const priorityScore = getInterceptPriority(
+      enemyPlatform,
+      cities,
+      activeEnemyPlatforms,
+    );
     let bestPlatform: MobilePlatform | undefined;
     let bestWeapon: Weapon | undefined;
     let bestInterceptDistance = Number.POSITIVE_INFINITY;
@@ -419,8 +850,20 @@ function allocateHeuristicResources(
         continue;
       }
 
+      if (
+        hasVisibleJetsOrMissiles &&
+        alliedPlatform.platformClass === "fighterJet" &&
+        enemyPlatform.platformClass === "drone"
+      ) {
+        continue;
+      }
+
       const weaponSelection = selectBestWeapon(alliedPlatform, enemyPlatform);
-      if (!weaponSelection) {
+      const droneSacrificeEffectiveness = getDroneSacrificeEffectiveness(
+        alliedPlatform,
+        enemyPlatform,
+      );
+      if (!weaponSelection && droneSacrificeEffectiveness <= 0) {
         continue;
       }
 
@@ -450,16 +893,19 @@ function allocateHeuristicResources(
           ? postureSnapshot.surplusScore *
             (postureSnapshot.recallPressureActive ? 1.2 : 0.75)
           : 0;
-      const platformEffectiveness = weaponSelection
-        ? alliedPlatform.oneWay
-          ? getTerminalImpactEffectiveness(alliedPlatform, enemyPlatform)
-          : weaponSelection.effectiveness
-        : 0;
+      const platformEffectiveness =
+        droneSacrificeEffectiveness > 0
+          ? droneSacrificeEffectiveness
+          : weaponSelection
+            ? alliedPlatform.oneWay
+              ? getTerminalImpactEffectiveness(alliedPlatform, enemyPlatform)
+              : weaponSelection.effectiveness
+            : 0;
 
       const score =
         priorityScore * 1.3 +
         platformEffectiveness *
-          (alliedPlatform.oneWay ? 14 : 12) +
+          (droneSacrificeEffectiveness > 0 ? 11 : alliedPlatform.oneWay ? 14 : 12) +
         alliedPlatform.sensors.sensorRange / interceptSensorScoreScale -
         intercept.timeToIntercept * 1.1 -
         reservePenalty -
@@ -479,7 +925,14 @@ function allocateHeuristicResources(
       }
     }
 
-    if (!bestPlatform || !bestWeapon) {
+    if (
+      !bestPlatform ||
+      (!bestWeapon &&
+        !canDroneSacrificeTarget(
+          bestPlatform,
+          getPlatformTargetType(enemyPlatform),
+        ))
+    ) {
       continue;
     }
 
@@ -495,11 +948,19 @@ function allocateHeuristicResources(
       threatScore: enemyPlatform.threatLevel,
       priorityScore,
       interceptTimeSeconds: bestInterceptTime,
-      weaponName: bestWeapon?.name ?? "Terminal Impact Run",
+      weaponName:
+        bestWeapon?.name ??
+        (canDroneSacrificeTarget(bestPlatform, getPlatformTargetType(enemyPlatform))
+          ? "Sacrificial Drone Intercept"
+          : "Terminal Impact Run"),
       weaponClass: bestWeapon?.weaponClass,
       expectedEffectiveness: bestEffectiveness,
       reason:
-        bestPlatform.oneWay
+        canDroneSacrificeTarget(bestPlatform, getPlatformTargetType(enemyPlatform))
+          ? `${getPlatformDisplayName(bestPlatform)} can physically intercept ${getPlatformDisplayName(enemyPlatform)} ` +
+            `as a sacrificial drone run. It has no reusable weapons, but its sensor lock and intercept timing make it the ` +
+            `best available option to consume the incoming missile before city impact. ${bestReserveContext}`
+          : bestPlatform.oneWay
           ? `${getPlatformDisplayName(bestPlatform)} is committed to a terminal intercept against ` +
             `${getPlatformDisplayName(enemyPlatform)}. It will expend its terminal payload in a one-way attack run, ` +
             `inflict critical damage, and be lost in the process. Impact timing and payload yield make it the strongest ` +
@@ -668,6 +1129,7 @@ export function allocateResources(
   alliedSpawnZones: AlliedSpawnZone[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
+  enemyBases: EnemyBase[],
   postureMemory: TeamPostureMemory,
   deltaSeconds: number,
   debugSettings: DebugSettings,
@@ -687,10 +1149,24 @@ export function allocateResources(
     },
   );
   const postureSnapshot = posture.snapshot;
-  const heuristicAssignments = allocateHeuristicResources(
+  const reconAssignments = allocateReconAssignments(
     cities,
     alliedSpawnZones,
     alliedPlatforms,
+    enemyBases,
+    postureSnapshot,
+    debugSettings,
+  );
+  const reservedReconPlatformIds = new Set(
+    reconAssignments.map((assignment) => assignment.resourceId),
+  );
+  const combatAllocationPlatforms = alliedPlatforms.filter(
+    (platform) => !reservedReconPlatformIds.has(platform.id),
+  );
+  const combatHeuristicAssignments = allocateHeuristicResources(
+    cities,
+    alliedSpawnZones,
+    combatAllocationPlatforms,
     enemyPlatforms,
     postureSnapshot,
     debugSettings,
@@ -698,7 +1174,7 @@ export function allocateResources(
   const plannerInputs = generatePlannerCandidates({
     cities,
     alliedSpawnZones,
-    alliedPlatforms,
+    alliedPlatforms: combatAllocationPlatforms,
     enemyPlatforms,
     postureSnapshot,
     debugSettings,
@@ -720,12 +1196,12 @@ export function allocateResources(
       }
     : {
         mode: "heuristic-fallback",
-        objectiveScore: heuristicAssignments.reduce(
+        objectiveScore: combatHeuristicAssignments.reduce(
           (sum, assignment) => sum + assignment.priorityScore,
           0,
         ),
         consideredActionCount: plannerInputs.candidates.length,
-        selectedActionCount: heuristicAssignments.length,
+        selectedActionCount: combatHeuristicAssignments.length + reconAssignments.length,
         primaryRationale:
           "The planner did not find a confident action bundle, so the heuristic allocator remained in control.",
         beliefSummaries: plannerInputs.beliefs.slice(0, 4).map((belief) => ({
@@ -736,9 +1212,12 @@ export function allocateResources(
       };
 
   return {
-    assignments: plannedResult?.assignments.length
-      ? plannedResult.assignments
-      : heuristicAssignments,
+    assignments: [
+      ...reconAssignments,
+      ...(plannedResult?.assignments.length
+        ? plannedResult.assignments
+        : combatHeuristicAssignments),
+    ],
     postureMemory: posture.memory,
     postureSnapshot,
     plannerSnapshot,

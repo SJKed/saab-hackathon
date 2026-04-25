@@ -12,6 +12,7 @@ import { distanceKm, kmToRaw, pixelToWorldDistance } from "../models/distance";
 import type { DebugSettings } from "../models/debug";
 import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
+  canDroneSacrificeTarget,
   clonePlatform,
   getPlatformDisplayName,
   getPrimaryPayloadWeapon,
@@ -443,7 +444,9 @@ function getPlatformEngagementRange(
   );
 
   if (!attacker.oneWay) {
-    return weaponRange;
+    return canDroneSacrificeTarget(attacker, targetType)
+      ? Math.max(weaponRange, minimumStrikeDistance)
+      : weaponRange;
   }
 
   const payloadWeapon =
@@ -709,6 +712,68 @@ function resolvePlatformFire(
 ): FireResult {
   const distance = distanceKm(attacker.position, targetPlatform.position);
   const targetType = getPlatformTargetType(targetPlatform);
+  if (
+    canDroneSacrificeTarget(attacker, targetType) &&
+    distance <= minimumStrikeDistance
+  ) {
+    const destroyedAttacker: MobilePlatform = {
+      ...attacker,
+      combat: {
+        ...attacker.combat,
+        durability: 0,
+      },
+      status: "destroyed",
+      velocity: { x: 0, y: 0 },
+      engagedWithId: undefined,
+      combatPhase: undefined,
+      combatPhaseTimeSeconds: 0,
+      disengageReason: undefined,
+    };
+    const destroyedTargetPlatform: MobilePlatform = {
+      ...targetPlatform,
+      combat: {
+        ...targetPlatform.combat,
+        durability: 0,
+      },
+      status: "destroyed",
+      velocity: { x: 0, y: 0 },
+      engagedWithId: undefined,
+      combatPhase: undefined,
+      combatPhaseTimeSeconds: 0,
+      disengageReason: undefined,
+    };
+    const impactDamage = targetPlatform.combat.maxDurability;
+    const event = createExchangeEvent(
+      tick,
+      destroyedAttacker,
+      attacker.team === "allied" ? "allied-platform" : "enemy-platform",
+      attacker.position,
+      destroyedTargetPlatform,
+      targetPlatform.team === "allied" ? "allied-platform" : "enemy-platform",
+      targetPlatform.position,
+      undefined,
+      impactDamage,
+      {
+        inflictedToSource: attacker.combat.maxDurability,
+        outcome: "critical",
+      },
+    );
+    event.message = `${getPlatformDisplayName(attacker)} intercepted ${getPlatformDisplayName(targetPlatform)} in a sacrificial collision, destroying both platforms.`;
+
+    return {
+      updatedAttacker: destroyedAttacker,
+      updatedTargetPlatform: destroyedTargetPlatform,
+      event,
+      destroyedEvent: createDestroyedEvent(
+        tick,
+        destroyedTargetPlatform,
+        destroyedTargetPlatform.team === "allied"
+          ? "allied-platform"
+          : "enemy-platform",
+        targetPlatform.position,
+      ),
+    };
+  }
   const payloadWeapon = attacker.oneWay
     ? getPrimaryPayloadWeapon(attacker, targetType) ??
       getPrimaryPayloadWeapon(attacker)
@@ -1048,7 +1113,10 @@ function hasCompatiblePayload(
   platform: MobilePlatform,
   targetType: TargetType,
 ): boolean {
-  return getWeaponsForTarget(platform, targetType).length > 0;
+  return (
+    canDroneSacrificeTarget(platform, targetType) ||
+    getWeaponsForTarget(platform, targetType).length > 0
+  );
 }
 
 function refreshEngagementPhase(
@@ -1144,6 +1212,16 @@ function refreshEngagementPhase(
     return setCombatPhase(platform, "attackRun", {
       engagedWithId: target.id,
     });
+  }
+
+  if (canDroneSacrificeTarget(platform, targetType)) {
+    return setCombatPhase(
+      platform,
+      distance <= preferredRange * 1.4 ? "attackRun" : "pursuing",
+      {
+        engagedWithId: target.id,
+      },
+    );
   }
 
   if (mergeOrOvershoot) {

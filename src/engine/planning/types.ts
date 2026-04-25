@@ -23,6 +23,7 @@ export type PlannerActionCandidate = {
   resourceName: string;
   targetId: string;
   targetName: string;
+  targetPlatformClass?: MobilePlatform["platformClass"];
   distance: number;
   interceptTimeSeconds?: number;
   confidence: number;

@@ -8,7 +8,12 @@ import { coordinateEnemyDeployments } from "../engine/enemy-director";
 import { updateMetricsState } from "../engine/metrics";
 import { calculateThreatsForCities } from "../engine/threat";
 import { buildTrainingFeedback } from "../engine/training-feedback";
-import { isPlatformDestroyed } from "../models/platform-utils";
+import {
+  canDroneSacrificeTarget,
+  getPlatformTargetType,
+  isPlatformDestroyed,
+  isReconPlatform,
+} from "../models/platform-utils";
 import {
   updateEnemyPositions,
   updateResourcePositions,
@@ -54,6 +59,7 @@ export function advanceSimulation(
     enemyPlatforms,
     previousState: state.detectionState,
     tick: nextTick,
+    debugSettings,
   });
   const detectedEnemyPlatforms = getDetectedEnemyPlatforms(
     enemyPlatforms,
@@ -65,29 +71,52 @@ export function advanceSimulation(
     state.alliedSpawnZones,
     state.alliedPlatforms,
     detectedEnemyPlatforms,
+    state.enemyBases,
     state.alliedPostureMemory,
     deltaSeconds,
     debugSettings,
   );
-  const operatorAssignments =
-    commandMode === "training"
-      ? state.operatorAssignments.filter((assignment) => {
-          const resource = state.alliedPlatforms.find(
-            (platform) => platform.id === assignment.resourceId,
-          );
-          if (!resource || isPlatformDestroyed(resource)) {
-            return false;
-          }
+  const operatorAssignments = state.operatorAssignments.filter((assignment) => {
+    const resource = state.alliedPlatforms.find(
+      (platform) => platform.id === assignment.resourceId,
+    );
+    if (!resource || isPlatformDestroyed(resource)) {
+      return false;
+    }
 
-          return assignment.mission === "intercept"
-            ? enemyPlatforms.some((enemy) => enemy.id === assignment.targetId)
-            : state.alliedCities.some((city) => city.id === assignment.targetId);
-        })
-      : [];
+    if (assignment.mission === "recon") {
+      return assignment.targetPosition !== undefined;
+    }
+
+    if (assignment.mission === "intercept") {
+      const target = enemyPlatforms.find((enemy) => enemy.id === assignment.targetId);
+      if (!target) {
+        return false;
+      }
+
+      return isReconPlatform(resource)
+        ? canDroneSacrificeTarget(resource, getPlatformTargetType(target))
+        : true;
+    }
+
+    return state.alliedCities.some((city) => city.id === assignment.targetId);
+  });
+  const manualReconAssignments = operatorAssignments.filter(
+    (assignment) => assignment.mission === "recon",
+  );
   const activeAssignments =
     commandMode === "training"
       ? operatorAssignments
-      : allocationResult.assignments;
+      : [
+          ...allocationResult.assignments.filter(
+            (assignment) =>
+              !manualReconAssignments.some(
+                (manualAssignment) =>
+                  manualAssignment.resourceId === assignment.resourceId,
+              ),
+          ),
+          ...manualReconAssignments,
+        ];
   const metricsState = updateMetricsState(
     state.metricsState,
     enemyPlatforms,
@@ -100,6 +129,7 @@ export function advanceSimulation(
     state.alliedCities,
     detectedEnemyPlatforms,
     state.alliedSpawnZones,
+    state.enemyBases,
     deltaSeconds,
     state.mapData.bounds,
     debugSettings,
@@ -111,6 +141,7 @@ export function advanceSimulation(
     enemyPlatforms,
     previousState: allocationDetectionState,
     tick: nextTick,
+    debugSettings,
   });
 
   const combatResolution = resolveCombat({

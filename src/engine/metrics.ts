@@ -123,7 +123,9 @@ export function getMetricsSnapshot(
   const activeInterceptCount = assignments.filter(
     (assignment) => assignment.mission === "intercept",
   ).length;
-  const activeReinforcementCount = assignments.length - activeInterceptCount;
+  const activeReinforcementCount = assignments.filter(
+    (assignment) => assignment.mission === "reinforce",
+  ).length;
   const averageResponseTicks = getAverage(
     Object.values(state.firstInterceptResponseTicks),
   );

@@ -1,8 +1,14 @@
 export type EnemyAggressionOverride = "auto" | "opening" | "pressure" | "surge";
+export type RadarDetectorType =
+  | "fixedRadar"
+  | "fighterJet"
+  | "drone"
+  | "ballisticMissile";
 
 export type DebugSettings = {
   disabledAlliedBaseIds: string[];
   disabledEnemyBaseIds: string[];
+  disabledRadarTypes: RadarDetectorType[];
   alliedDamageMultiplier: number;
   enemyDamageMultiplier: number;
   fuelBurnMultiplier: number;
@@ -12,6 +18,7 @@ export type DebugSettings = {
 export const defaultDebugSettings: DebugSettings = {
   disabledAlliedBaseIds: [],
   disabledEnemyBaseIds: [],
+  disabledRadarTypes: [],
   alliedDamageMultiplier: 1,
   enemyDamageMultiplier: 1,
   fuelBurnMultiplier: 1,
@@ -23,6 +30,7 @@ export function cloneDebugSettings(settings: DebugSettings): DebugSettings {
     ...settings,
     disabledAlliedBaseIds: [...settings.disabledAlliedBaseIds],
     disabledEnemyBaseIds: [...settings.disabledEnemyBaseIds],
+    disabledRadarTypes: [...settings.disabledRadarTypes],
   };
 }
 
@@ -38,4 +46,11 @@ export function isEnemyBaseDeploymentDisabled(
   baseId: string | undefined,
 ): boolean {
   return Boolean(baseId && settings.disabledEnemyBaseIds.includes(baseId));
+}
+
+export function isRadarDisabledForType(
+  settings: DebugSettings,
+  detectorType: RadarDetectorType,
+): boolean {
+  return settings.disabledRadarTypes.includes(detectorType);
 }

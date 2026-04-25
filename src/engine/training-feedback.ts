@@ -5,15 +5,18 @@ export function buildTrainingFeedback(
   advisorAssignments: ResourceAssignment[],
 ): string[] {
   const messages: string[] = [];
+  const comparableOperatorAssignments = operatorAssignments.filter(
+    (assignment) => assignment.mission !== "recon",
+  );
 
   if (advisorAssignments.length === 0) {
-    if (operatorAssignments.length === 0) {
+    if (comparableOperatorAssignments.length === 0) {
       messages.push("The AI advisor sees no immediate allied deployment requirement.");
     }
     return messages;
   }
 
-  if (operatorAssignments.length === 0) {
+  if (comparableOperatorAssignments.length === 0) {
     const topAdvice = advisorAssignments[0];
     messages.push(
       `Recommendation: ${topAdvice.resourceName} should ${topAdvice.mission} ${topAdvice.targetName} now.`,
@@ -22,7 +25,7 @@ export function buildTrainingFeedback(
     return messages;
   }
 
-  const matchedAssignments = operatorAssignments.filter((operatorAssignment) =>
+  const matchedAssignments = comparableOperatorAssignments.filter((operatorAssignment) =>
     advisorAssignments.some(
       (advice) =>
         advice.resourceId === operatorAssignment.resourceId &&
@@ -42,9 +45,9 @@ export function buildTrainingFeedback(
     );
   }
 
-  if (operatorAssignments.length < advisorAssignments.length) {
+  if (comparableOperatorAssignments.length < advisorAssignments.length) {
     messages.push(
-      `The operator has committed fewer assets than the advisor bundle (${operatorAssignments.length}/${advisorAssignments.length}).`,
+      `The operator has committed fewer assets than the advisor bundle (${comparableOperatorAssignments.length}/${advisorAssignments.length}).`,
     );
   }
 

@@ -162,10 +162,10 @@ const alliedFighterTemplate: PlatformTemplate = {
 };
 
 const alliedDroneTemplate: PlatformTemplate = {
-  label: "Defense Drone",
+  label: "Recon Drone",
   platformClass: "drone",
-  role: "patrol",
-  threatLevel: 0.35,
+  role: "recon",
+  threatLevel: 0.14,
   maxSpeed: 560,
   cruiseSpeed: 430,
   acceleration: 260,
@@ -179,21 +179,11 @@ const alliedDroneTemplate: PlatformTemplate = {
   sensors: {
     sensorRange: scaleDistance(172),
     sensorType: "infrared",
-    trackingQuality: 0.72,
+    trackingQuality: 0.78,
     targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
-    jamResistance: 0.55,
+    jamResistance: 0.62,
   },
-  weapons: [
-    rapidFireTemplate(
-      "Stabilized Gun Pod",
-      18,
-      8,
-      0.68,
-      42,
-      ["drone", "ballisticMissile"],
-    ),
-    airToAirMissileTemplate(2, ["drone", "ballisticMissile"]),
-  ],
+  weapons: [],
 };
 
 const alliedBallisticMissileTemplate: PlatformTemplate = {
@@ -351,8 +341,8 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
 };
 
 const targetInventoryPerBase: PlatformInventory = {
-  fighterJet: 2,
-  drone: 5,
+  fighterJet: 4,
+  drone: 2,
   ballisticMissile: 4,
 };
 

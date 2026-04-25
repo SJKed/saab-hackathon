@@ -11,7 +11,12 @@ import type {
 
 export type CombatVisualEffect = {
   id: string;
-  kind: "tracer" | "missileTrail" | "impactRing" | "strikeBurst";
+  kind:
+    | "tracer"
+    | "missileTrail"
+    | "impactRing"
+    | "strikeBurst"
+    | "floatingText";
   sourceId?: string;
   targetId?: string;
   start: { x: number; y: number };
@@ -21,6 +26,7 @@ export type CombatVisualEffect = {
   durationMs: number;
   weaponClass?: CombatLogEvent["weaponClass"];
   intensity?: number;
+  text?: string;
 };
 
 export type EntityRenderData = {

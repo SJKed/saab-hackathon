@@ -38,6 +38,12 @@ export function getAssignmentTarget(
   cities: AlliedCity[],
   enemyPlatforms: MobilePlatform[],
 ): Vector | undefined {
+  if (assignment.mission === "recon") {
+    return assignment.targetPosition
+      ? { ...assignment.targetPosition }
+      : undefined;
+  }
+
   if (assignment.mission === "intercept") {
     const enemyPlatform = enemyPlatforms.find(
       (enemy) => enemy.id === assignment.targetId,

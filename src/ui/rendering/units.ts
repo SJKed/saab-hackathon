@@ -21,6 +21,51 @@ import {
 } from "./shared";
 import type { EntityRenderData } from "./types";
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getDurabilityBarColor(durabilityRatio: number): string {
+  if (durabilityRatio <= 0.35) {
+    return "#ff5d5d";
+  }
+
+  if (durabilityRatio <= 0.6) {
+    return "#ffb703";
+  }
+
+  return "#7ae582";
+}
+
+function drawPlatformDurabilityBar(
+  ctx: CanvasRenderingContext2D,
+  platform: MobilePlatform,
+  radius: number,
+): void {
+  const maxDurability = Math.max(1, platform.combat.maxDurability);
+  const durabilityRatio = clamp(platform.combat.durability / maxDurability, 0, 1);
+  const shouldShow =
+    Boolean(platform.engagedWithId || platform.combatPhase) || durabilityRatio < 0.999;
+  if (!shouldShow) {
+    return;
+  }
+
+  const width = platform.platformClass === "fighterJet" ? 26 : 20;
+  const height = 4;
+  const x = platform.position.x - width / 2;
+  const y = platform.position.y + radius + 6;
+
+  ctx.fillStyle = "rgba(8, 10, 14, 0.78)";
+  ctx.fillRect(x - 1, y - 1, width + 2, height + 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.fillRect(x, y, width, height);
+  ctx.fillStyle = getDurabilityBarColor(durabilityRatio);
+  ctx.fillRect(x, y, width * durabilityRatio, height);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.65)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, width + 1, height + 1);
+}
+
 function drawAlliedCity(ctx: CanvasRenderingContext2D, city: AlliedCity): void {
   const size = 18;
   const x = city.position.x;
@@ -207,6 +252,7 @@ function drawPlatform(
     ctx.fill();
   }
 
+  drawPlatformDurabilityBar(ctx, platform, radius);
   drawLabel(ctx, platform.name ?? platform.id, x, y - 14);
   ctx.restore();
 }

@@ -42,6 +42,31 @@ type CandidateGenerationResult = {
 const plannerFuelCommitmentBufferSeconds = 3;
 const reinforceDistancePenaltyScale = pixelToWorldDistance(85);
 
+function hasVisibleHighPriorityAirThreats(enemyPlatforms: MobilePlatform[]): boolean {
+  return enemyPlatforms.some(
+    (enemyPlatform) =>
+      isPlatformDeployed(enemyPlatform) &&
+      (enemyPlatform.platformClass === "fighterJet" ||
+        enemyPlatform.platformClass === "ballisticMissile"),
+  );
+}
+
+function getInterceptTargetPriorityBoost(
+  enemyPlatform: MobilePlatform,
+  enemyPlatforms: MobilePlatform[],
+): number {
+  switch (enemyPlatform.platformClass) {
+    case "fighterJet":
+      return 8.5;
+    case "ballisticMissile":
+      return 3.4;
+    case "drone":
+      return hasVisibleHighPriorityAirThreats(enemyPlatforms) ? -4.5 : 1.8;
+    default:
+      return 0;
+  }
+}
+
 function isPlannerAvailable(
   platform: MobilePlatform,
   alliedSpawnZones: AlliedSpawnZone[],
@@ -104,6 +129,9 @@ export function generatePlannerCandidates(input: {
   const availablePlatforms = input.alliedPlatforms.filter((platform) =>
     isPlannerAvailable(platform, input.alliedSpawnZones, input.debugSettings),
   );
+  const hasVisibleJetsOrMissiles = hasVisibleHighPriorityAirThreats(
+    input.enemyPlatforms,
+  );
 
   for (const enemyPlatform of input.enemyPlatforms.filter(isPlatformDeployed)) {
     const belief = beliefs.find((entry) => entry.enemyId === enemyPlatform.id);
@@ -118,6 +146,14 @@ export function generatePlannerCandidates(input: {
     const interceptCandidates = availablePlatforms
       .filter(hasReusablePayload)
       .map((platform) => {
+        if (
+          hasVisibleJetsOrMissiles &&
+          platform.platformClass === "fighterJet" &&
+          enemyPlatform.platformClass === "drone"
+        ) {
+          return undefined;
+        }
+
         const intercept = predictIntercept(platform, enemyPlatform, input.cities);
         if (!intercept?.feasibleBeforeImpact || !intercept.acquisitionFeasible) {
           return undefined;
@@ -141,6 +177,7 @@ export function generatePlannerCandidates(input: {
           resourceName: getPlatformDisplayName(platform),
           targetId: enemyPlatform.id,
           targetName: getPlatformDisplayName(enemyPlatform),
+          targetPlatformClass: enemyPlatform.platformClass,
           distance: intercept.distance,
           interceptTimeSeconds: intercept.timeToIntercept,
           confidence: belief?.confidence ?? 0.5,
@@ -157,6 +194,7 @@ export function generatePlannerCandidates(input: {
         };
         candidate.baseScore =
           scorePlannerCandidate(candidate) +
+          getInterceptTargetPriorityBoost(enemyPlatform, input.enemyPlatforms) +
           getCityPriorityBoost(targetCity) * 0.15 -
           intercept.timeToIntercept * 0.85;
         return candidate;

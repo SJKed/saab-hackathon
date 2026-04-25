@@ -22,6 +22,7 @@ import {
   getPreferredCombatRange,
   getWeaponBlastRadius,
   hasUsablePayload,
+  isReconPlatform,
   isPlatformDestroyed,
   isPlatformStored,
 } from "../../models/platform-utils";
@@ -93,7 +94,7 @@ export function refreshWeapons(
 }
 
 export function hasRemainingAmmo(platform: MobilePlatform): boolean {
-  return hasUsablePayload(platform);
+  return isReconPlatform(platform) ? true : hasUsablePayload(platform);
 }
 
 function tryDockAtRecoveryBase(

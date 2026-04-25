@@ -17,10 +17,17 @@ function getEffectDurationMs(kind: CombatVisualEffect["kind"]): number {
       return 320;
     case "strikeBurst":
       return 360;
+    case "floatingText":
+      return 780;
     default:
       return 320;
   }
 }
+
+const missTextColor = "#f5f5f5";
+const hitTextColor = "#ffb703";
+const critTextColor = "#ff5252";
+const killTextColor = "#ff4d6d";
 
 function getEventEffectColor(event: CombatLogEvent): string {
   if (event.source?.category?.startsWith("allied")) {
@@ -66,6 +73,34 @@ function createCombatEffect(
   };
 }
 
+function createFloatingTextEffect(
+  id: string,
+  event: CombatLogEvent,
+  createdAtMs: number,
+  text: string,
+  color: string,
+  intensity = 1,
+): CombatVisualEffect | null {
+  if (!event.targetPosition) {
+    return null;
+  }
+
+  return {
+    id,
+    kind: "floatingText",
+    sourceId: event.source?.id,
+    targetId: event.target?.id ?? event.destroyedUnit?.id,
+    start: { ...event.targetPosition },
+    end: { ...event.targetPosition },
+    color,
+    createdAtMs,
+    durationMs: getEffectDurationMs("floatingText"),
+    weaponClass: event.weaponClass,
+    intensity,
+    text,
+  };
+}
+
 function getEventTargetKey(event: CombatLogEvent): string | undefined {
   if (event.target?.id) {
     return event.target.id;
@@ -97,6 +132,22 @@ export function mapCombatEventsToEffects(
       }
       const isMiss = event.outcome === "miss";
       const isCritical = event.outcome === "critical";
+      const roundedDamage = Math.max(0, Math.round(event.inflictedToTarget ?? 0));
+      const floatingText = createFloatingTextEffect(
+        `${event.id}-text`,
+        event,
+        createdAtMs,
+        isMiss
+          ? "MISS"
+          : isCritical
+            ? `CRIT -${roundedDamage}`
+            : `HIT -${roundedDamage}`,
+        isMiss ? missTextColor : isCritical ? critTextColor : hitTextColor,
+        isMiss ? 0.95 : isCritical ? 1.18 : 1,
+      );
+      if (floatingText) {
+        effects.push(floatingText);
+      }
 
       if (event.weaponClass === "rapidFire") {
         const tracer = createCombatEffect(
@@ -115,7 +166,7 @@ export function mapCombatEventsToEffects(
             "impactRing",
             event,
             createdAtMs,
-            isCritical ? 1.05 : 0.7,
+            isCritical ? 1.25 : 0.82,
           );
           if (impact) {
             effects.push(impact);
@@ -127,7 +178,7 @@ export function mapCombatEventsToEffects(
             "strikeBurst",
             event,
             createdAtMs,
-            0.9,
+            1.05,
           );
           if (burst) {
             effects.push(burst);
@@ -153,7 +204,7 @@ export function mapCombatEventsToEffects(
             "impactRing",
             event,
             createdAtMs,
-            isCritical ? 1.35 : 1,
+            isCritical ? 1.6 : 1.1,
           );
           if (impact) {
             effects.push(impact);
@@ -165,7 +216,7 @@ export function mapCombatEventsToEffects(
             "strikeBurst",
             event,
             createdAtMs,
-            1.15,
+            1.35,
           );
           if (burst) {
             effects.push(burst);
@@ -183,24 +234,24 @@ export function mapCombatEventsToEffects(
             createdAtMs,
             event.weaponClass === "terminalPayload"
               ? isCritical
-                ? 1.45
-                : 1.25
+                ? 1.7
+                : 1.4
               : isCritical
-                ? 1.35
-                : 1.15,
+                ? 1.55
+                : 1.25,
           );
           const impact = createCombatEffect(
             `${event.id}-impact`,
             "impactRing",
             event,
             createdAtMs,
-            event.weaponClass === "terminalPayload"
-              ? isCritical
-                ? 1.5
-                : 1.3
-              : isCritical
-                ? 1.35
-                : 1.2,
+              event.weaponClass === "terminalPayload"
+                ? isCritical
+                  ? 1.85
+                  : 1.5
+                : isCritical
+                  ? 1.55
+                  : 1.28,
           );
           if (burst) {
             effects.push(burst);
@@ -231,7 +282,7 @@ export function mapCombatEventsToEffects(
         "impactRing",
         event,
         createdAtMs,
-        isCritical ? 1.6 : 1.4,
+        isCritical ? 1.85 : 1.45,
       );
       if (genericImpact) {
         effects.push(genericImpact);
@@ -242,7 +293,7 @@ export function mapCombatEventsToEffects(
           "strikeBurst",
           event,
           createdAtMs,
-          1.25,
+          1.45,
         );
         if (burst) {
           effects.push(burst);
@@ -253,19 +304,39 @@ export function mapCombatEventsToEffects(
 
     if (event.kind === "destroyed") {
       const targetKey = getEventTargetKey(event);
-      if (targetKey && engagementTargets.has(targetKey)) {
-        continue;
-      }
-
+      const followedEngagement = Boolean(targetKey && engagementTargets.has(targetKey));
       const impact = createCombatEffect(
         `${event.id}-impact`,
         "impactRing",
         event,
         createdAtMs,
-        1,
+        followedEngagement ? 1.9 : 1.45,
       );
       if (impact) {
         effects.push(impact);
+      }
+
+      const burst = createCombatEffect(
+        `${event.id}-burst`,
+        "strikeBurst",
+        event,
+        createdAtMs,
+        followedEngagement ? 1.8 : 1.45,
+      );
+      if (burst) {
+        effects.push(burst);
+      }
+
+      const killText = createFloatingTextEffect(
+        `${event.id}-kill`,
+        event,
+        createdAtMs,
+        "KILL",
+        killTextColor,
+        followedEngagement ? 1.25 : 1.1,
+      );
+      if (killText) {
+        effects.push(killText);
       }
     }
   }
@@ -294,6 +365,27 @@ export function drawCombatEffects(
     ctx.strokeStyle = hexToRgba(effect.color, alpha);
     ctx.fillStyle = hexToRgba(effect.color, alpha * 0.9);
     ctx.shadowColor = hexToRgba(effect.color, alpha * 0.75);
+
+    if (effect.kind === "floatingText") {
+      const lift = 22 * progress * (effect.intensity ?? 1);
+      const scale = clamp(1 + (1 - progress) * 0.14 * (effect.intensity ?? 1), 0.95, 1.2);
+      const textX = effect.end.x;
+      const textY = effect.end.y - 12 - lift;
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.shadowBlur = 0;
+      ctx.font = `bold ${Math.round(clamp(13 * scale, 13, 18))}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = clamp(4 * (effect.intensity ?? 1), 3, 5.5);
+      ctx.strokeStyle = `rgba(12, 14, 18, ${alpha * 0.96})`;
+      ctx.fillStyle = hexToRgba(effect.color, alpha);
+      ctx.strokeText(effect.text ?? "", textX, textY);
+      ctx.fillText(effect.text ?? "", textX, textY);
+      ctx.restore();
+      continue;
+    }
 
     if (effect.kind === "tracer") {
       ctx.shadowBlur = clamp(6 * (effect.intensity ?? 1), 3, 8);

@@ -22,6 +22,20 @@ function getIncrementalPenalty(
   postureSnapshot: AlliedForcePostureSnapshot,
 ): number {
   if (candidate.mission === "intercept") {
+    const currentFighterInterceptsOnTarget = state.selected.filter(
+      (selectedCandidate) =>
+        selectedCandidate.mission === "intercept" &&
+        selectedCandidate.targetId === candidate.targetId &&
+        selectedCandidate.sourcePlatform.platformClass === "fighterJet",
+    ).length;
+    if (
+      candidate.targetPlatformClass === "drone" &&
+      candidate.sourcePlatform.platformClass === "fighterJet" &&
+      currentFighterInterceptsOnTarget >= 1
+    ) {
+      return 100;
+    }
+
     const currentCount = state.interceptCountByTarget.get(candidate.targetId) ?? 0;
     if (currentCount >= 2) {
       return 5.5 + currentCount * 1.5;

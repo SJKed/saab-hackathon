@@ -111,6 +111,11 @@ function drawAssignments(
       ctx.beginPath();
       ctx.arc(target.x, target.y, 4, 0, Math.PI * 2);
       ctx.fill();
+    } else if (assignment.mission === "recon") {
+      ctx.fillStyle = assignmentColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     const midpointX = (platform.position.x + target.x) * 0.5;
@@ -120,7 +125,11 @@ function drawAssignments(
     ctx.fillStyle = "rgba(224, 224, 224, 0.9)";
     ctx.fillText(
       `${
-        assignment.mission === "intercept" ? "INT" : "RFT"
+        assignment.mission === "intercept"
+          ? "INT"
+          : assignment.mission === "recon"
+            ? "RCN"
+            : "RFT"
       }: ${assignment.resourceName} -> ${assignment.targetName}`,
       midpointX,
       midpointY - 6,

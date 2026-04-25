@@ -11,7 +11,12 @@ import type { MapBounds } from "../data/loader";
 import type { ResourceAssignment } from "../engine/allocation";
 import { getMetricsSnapshot } from "../engine/metrics";
 import { distanceWorld } from "../models/distance";
-import { getPlatformDisplayName } from "../models/platform-utils";
+import {
+  canDroneSacrificeTarget,
+  getPlatformDisplayName,
+  getPlatformTargetType,
+  isReconPlatform,
+} from "../models/platform-utils";
 import type { TrainingDeployRequest } from "../models/training";
 import type { StrategyMode } from "../ui/controls";
 import { createControls } from "../ui/controls";
@@ -117,11 +122,42 @@ export function startSimulation(shell: AppShell): void {
       return undefined;
     }
 
+    if (request.mission === "recon") {
+      if (!request.targetPosition || !isReconPlatform(platform)) {
+        return undefined;
+      }
+
+      const roundedPosition = {
+        x: Math.round(request.targetPosition.x),
+        y: Math.round(request.targetPosition.y),
+      };
+
+      return {
+        mission: "recon",
+        targetId: `recon-point:${roundedPosition.x}:${roundedPosition.y}`,
+        targetName: `Recon point (${roundedPosition.x}, ${roundedPosition.y})`,
+        targetPosition: roundedPosition,
+        resourceId: platform.id,
+        resourceName: getPlatformDisplayName(platform),
+        distance: distanceWorld(platform.position, roundedPosition),
+        threatScore: 0,
+        priorityScore: 0,
+        reason:
+          "Operator-issued recon placement. The drone will move to the selected point and act as a mobile sensor picket.",
+      };
+    }
+
     if (request.mission === "intercept") {
       const target = state.enemyPlatforms.find(
         (candidate) => candidate.id === request.targetId,
       );
       if (!target) {
+        return undefined;
+      }
+      if (
+        isReconPlatform(platform) &&
+        !canDroneSacrificeTarget(platform, getPlatformTargetType(target))
+      ) {
         return undefined;
       }
 
@@ -158,11 +194,7 @@ export function startSimulation(shell: AppShell): void {
     };
   }
 
-  function applyTrainingRequests(commandMode: typeof lastCommandMode): void {
-    if (commandMode !== "training") {
-      return;
-    }
-
+  function applyOperatorRequests(): void {
     const deployRequest = trainingPanel.consumeDeployRequest();
     if (deployRequest) {
       const assignment = createOperatorAssignment(deployRequest);
@@ -293,6 +325,7 @@ export function startSimulation(shell: AppShell): void {
       ),
     );
     debugMenu.update({
+      alliedCities: state.alliedCities,
       alliedSpawnZones: state.alliedSpawnZones,
       enemyBases: state.enemyBases,
       alliedPlatforms: state.alliedPlatforms,
@@ -306,9 +339,15 @@ export function startSimulation(shell: AppShell): void {
       alliedSpawnZones: state.alliedSpawnZones,
       alliedPlatforms: state.alliedPlatforms,
       enemyPlatforms: state.enemyPlatforms,
-      operatorAssignments: state.operatorAssignments,
+      operatorAssignments:
+        controls.getState().commandMode === "training"
+          ? state.operatorAssignments
+          : state.operatorAssignments.filter(
+              (assignment) => assignment.mission === "recon",
+            ),
       advisorAssignments: state.advisorAssignments,
       feedbackMessages: state.trainingFeedback,
+      hoverPointWorld: hoverWorldPoint,
     });
   }
 
@@ -330,14 +369,12 @@ export function startSimulation(shell: AppShell): void {
       tickAccumulatorMs = 0;
       state = {
         ...state,
-        assignments:
-          controlsState.commandMode === "training" ? state.operatorAssignments : [],
         trainingFeedback: [],
       };
       lastCommandMode = controlsState.commandMode;
     }
 
-    applyTrainingRequests(controlsState.commandMode);
+    applyOperatorRequests();
     if (controls.consumeStepRequest()) {
       tickAccumulatorMs = 0;
       previousState = state;
