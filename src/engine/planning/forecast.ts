@@ -1,4 +1,5 @@
 import type { AlliedCity, MobilePlatform } from "../../models/entity";
+import { distanceKm } from "../../models/distance";
 import { distanceBetween } from "../../models/platform-utils";
 import type { EnemyIntentBelief } from "./types";
 
@@ -55,7 +56,7 @@ export function estimateCityResidualRisk(
     const probability =
       belief?.cityProbabilities.find((entry) => entry.cityId === city.id)?.probability ?? 0;
     const distanceFactor =
-      1 / (1 + distanceBetween(enemyPlatform.position, city.position) / 260);
+      1 / (1 + distanceKm(enemyPlatform.position, city.position) / 260);
 
     return total + enemyPlatform.threatLevel * probability * (0.8 + distanceFactor * 1.2);
   }, city.threat * 50);

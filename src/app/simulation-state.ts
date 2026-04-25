@@ -2,6 +2,11 @@ import { loadMapData, type NormalizedMapData } from "../data/loader";
 import type { ResourceAssignment } from "../engine/allocation";
 import type { CombatLogEvent } from "../engine/combat";
 import {
+  calculateDetectionState,
+  createDetectionState,
+  type DetectionState,
+} from "../engine/detection";
+import {
   createEnemyDirectorState,
   type EnemyDirectorState,
 } from "../engine/enemy-director";
@@ -39,6 +44,7 @@ export type SimulationState = {
   enemyBases: EnemyBase[];
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
+  detectionState: DetectionState;
   assignments: ResourceAssignment[];
   eventLog: CombatLogEvent[];
   combatEffects: CombatVisualEffect[];
@@ -131,9 +137,23 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
   const enemyBases = mapData.enemyBases.map(cloneStaticObjective);
   const alliedPlatforms = mapData.alliedPlatforms.map(clonePlatform);
   const enemyPlatforms = createEnemyDeployments(enemyBases, alliedCities);
+  const detectionState = calculateDetectionState({
+    alliedCities,
+    alliedSpawnZones,
+    alliedPlatforms,
+    enemyPlatforms,
+    previousState: createDetectionState(),
+    tick: 0,
+  });
   const alliedPostureMemory = createTeamPostureMemory();
   const alliedPosture = applyPostureMemory(
-    evaluateAlliedForcePosture(alliedCities, alliedPlatforms, enemyPlatforms),
+    evaluateAlliedForcePosture(
+      alliedCities,
+      alliedPlatforms,
+      enemyPlatforms.filter((enemyPlatform) =>
+        detectionState.detectedEnemyIds.includes(enemyPlatform.id),
+      ),
+    ),
     alliedPostureMemory,
     0,
   );
@@ -145,6 +165,7 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     enemyBases,
     alliedPlatforms,
     enemyPlatforms,
+    detectionState,
     assignments: [],
     eventLog: [],
     combatEffects: [],

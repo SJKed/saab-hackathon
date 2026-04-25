@@ -10,6 +10,7 @@ import type {
   Vector,
 } from "../../models/entity";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../../models/platform-constants";
+import { kmToRaw } from "../../models/distance";
 import {
   distanceBetween,
   getPlatformTargetType,
@@ -18,12 +19,17 @@ import {
   isPlatformDestroyed,
   isPlatformStored,
 } from "../../models/platform-utils";
-import { getPlatformTransitSpeed, predictLeadIntercept } from "../../engine/intercept";
+import {
+  getPlatformCruiseSpeed,
+  getPlatformMaxSpeed,
+  getPlatformTransitSpeed,
+  predictLeadIntercept,
+} from "../../engine/intercept";
 
-export const minimumDistanceToTarget = 8;
-export const minimumDistanceToAssignmentTarget = 10;
-export const minimumReturnDistance = 10;
-const oneWayTerminalHomingDistance = 22;
+export const minimumDistanceToTarget = kmToRaw(2.4);
+export const minimumDistanceToAssignmentTarget = kmToRaw(3);
+export const minimumReturnDistance = kmToRaw(3);
+const oneWayTerminalHomingDistance = kmToRaw(6.5);
 const oneWayLeadHorizonSeconds = 1.35;
 const mapEdgePadding = 8;
 
@@ -296,7 +302,7 @@ export function routePlatformToClosestBase(
     returningPlatform,
     closestBase.position,
     minimumReturnDistance,
-    returningPlatform.cruiseSpeed,
+    getPlatformCruiseSpeed(returningPlatform),
     deltaSeconds,
     bounds,
   );
@@ -403,21 +409,21 @@ export function maneuverAgainstTarget(
   bounds: MapBounds,
 ): MobilePlatform {
   const targetType: TargetType = getPlatformTargetType(target);
-  const desiredRange = getPreferredCombatRange(platform, targetType);
+  const desiredRange = kmToRaw(getPreferredCombatRange(platform, targetType));
   const currentDistance = distanceBetween(platform.position, target.position);
   const combatSpeed =
     platform.combatPhase === "attackRun"
-      ? platform.maxSpeed
-      : Math.min(platform.maxSpeed, getPlatformTransitSpeed(platform) * 0.94);
+      ? getPlatformMaxSpeed(platform)
+      : Math.min(getPlatformMaxSpeed(platform), getPlatformTransitSpeed(platform) * 0.94);
   const lateralSign = getCombatLateralSign(platform);
 
   if (platform.oneWay) {
     const terminalDistance = Math.max(
       oneWayTerminalHomingDistance,
-      (platform.impactRadius ?? 12) * 2.4,
+      kmToRaw(platform.impactRadius ?? 12) * 2.4,
     );
     const leadPrediction = predictLeadIntercept(platform, target, {
-      speedOverride: platform.maxSpeed,
+      speedOverride: getPlatformMaxSpeed(platform),
       maxLeadSeconds: oneWayLeadHorizonSeconds,
     });
     const inTerminalHomingWindow = currentDistance <= terminalDistance;
@@ -430,8 +436,8 @@ export function maneuverAgainstTarget(
         disengageReason: undefined,
       },
       inTerminalHomingWindow ? target.position : leadPrediction?.point ?? target.position,
-      inTerminalHomingWindow ? 0 : Math.max(0, (platform.impactRadius ?? 10) * 0.18),
-      platform.maxSpeed,
+      inTerminalHomingWindow ? 0 : Math.max(0, kmToRaw(platform.impactRadius ?? 10) * 0.18),
+      getPlatformMaxSpeed(platform),
       deltaSeconds,
       bounds,
     );

@@ -4,8 +4,8 @@ import type {
   PlatformClass,
   Weapon,
 } from "../models/entity";
+import { distanceKm } from "../models/distance";
 import {
-  distanceBetween,
   getPlatformDisplayName,
   getPlatformTargetType,
   getUsableAmmoCost,
@@ -524,7 +524,7 @@ function allocateHeuristicResources(
         continue;
       }
 
-      const distance = distanceBetween(alliedPlatform.position, city.position);
+      const distance = distanceKm(alliedPlatform.position, city.position);
       const reservePenalty = getReservePenalty(
         alliedPlatform,
         storedReserveByOrigin,

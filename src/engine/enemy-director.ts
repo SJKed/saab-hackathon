@@ -4,10 +4,10 @@ import type {
   MobilePlatform,
   PlatformClass,
 } from "../models/entity";
+import { distanceKm } from "../models/distance";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
 import {
   clonePlatform,
-  distanceBetween,
   getUsableAmmoCost,
   isPlatformDeployed,
   isPlatformDestroyed,
@@ -151,7 +151,7 @@ function getCoverageContribution(
   weightMultiplier: number,
 ): number {
   const distanceFactor =
-    1 / (1 + distanceBetween(platform.position, city.position) / distanceScale);
+    1 / (1 + distanceKm(platform.position, city.position) / distanceScale);
   const platformStrength =
     getClassWeight(platform) *
     (0.5 +
@@ -202,7 +202,7 @@ function getCityExposureBreakdown(
     }
 
     const proximityFactor =
-      1 / (1 + distanceBetween(enemyPlatform.position, city.position) / 260);
+      1 / (1 + distanceKm(enemyPlatform.position, city.position) / 260);
     const targetBias = enemyPlatform.targetId === city.id ? 1.25 : 0.55;
     const pressureWeight =
       enemyPlatform.threatLevel *
@@ -316,7 +316,7 @@ function selectTargetCity(
   for (const cityExposure of cityExposureScores) {
     const city = alliedCities.find((candidate) => candidate.id === cityExposure.cityId);
     const cityDistance = city
-      ? distanceBetween(base.position, city.position)
+      ? distanceKm(base.position, city.position)
       : Number.POSITIVE_INFINITY;
     const proximityBias = Math.max(0.22, 1.2 - cityDistance / 980);
     const continuityBonus =

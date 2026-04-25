@@ -5,4 +5,8 @@ export {
   type LeadInterceptPrediction,
 } from "./intercept/prediction";
 export { getSensorEnvelope } from "./intercept/sensors";
-export { getPlatformTransitSpeed } from "./intercept/transit";
+export {
+  getPlatformCruiseSpeed,
+  getPlatformMaxSpeed,
+  getPlatformTransitSpeed,
+} from "./intercept/transit";

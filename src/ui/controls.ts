@@ -4,6 +4,7 @@ export type ControlsState = {
   isRunning: boolean;
   strategy: StrategyMode;
   speedMultiplier: number;
+  showHiddenEnemies: boolean;
 };
 
 type ControlsApi = {
@@ -32,6 +33,7 @@ export function createControls(container: HTMLElement): ControlsApi {
     isRunning: false,
     strategy: "balanced",
     speedMultiplier: 1,
+    showHiddenEnemies: false,
   };
   let restartRequested = false;
   let resetViewRequested = false;
@@ -144,6 +146,25 @@ export function createControls(container: HTMLElement): ControlsApi {
   speedRow.appendChild(speedSlider);
   speedRow.appendChild(speedValue);
   panel.appendChild(speedRow);
+
+  const fogRow = document.createElement("label");
+  fogRow.style.display = "flex";
+  fogRow.style.alignItems = "center";
+  fogRow.style.gap = "8px";
+  fogRow.style.fontSize = "12px";
+  fogRow.style.color = "#e0e0e0";
+  fogRow.style.cursor = "pointer";
+
+  const showHiddenEnemiesCheckbox = document.createElement("input");
+  showHiddenEnemiesCheckbox.type = "checkbox";
+  showHiddenEnemiesCheckbox.checked = state.showHiddenEnemies;
+  showHiddenEnemiesCheckbox.addEventListener("change", () => {
+    state.showHiddenEnemies = showHiddenEnemiesCheckbox.checked;
+  });
+
+  fogRow.appendChild(showHiddenEnemiesCheckbox);
+  fogRow.appendChild(document.createTextNode("Show hidden enemies"));
+  panel.appendChild(fogRow);
 
   container.style.position = "relative";
   container.appendChild(panel);
