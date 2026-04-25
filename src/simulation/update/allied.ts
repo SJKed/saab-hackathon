@@ -23,7 +23,10 @@ import {
   routePlatformToClosestBase,
   transitionCombatPhase,
 } from "./shared";
-import { getAssignmentTarget } from "./targeting";
+import {
+  getAssignmentTarget,
+  getLockedBallisticMissileTarget,
+} from "./targeting";
 
 export function updateResourcePositions(
   alliedPlatforms: MobilePlatform[],
@@ -101,6 +104,12 @@ export function updateResourcePositions(
       );
     }
 
+    const lockedBallisticMissileTarget = getLockedBallisticMissileTarget(
+      platform,
+      cities,
+      enemyPlatforms,
+    );
+
     if (platform.engagedWithId) {
       const engagedTarget = enemyPlatforms.find(
         (enemyPlatform) => enemyPlatform.id === platform.engagedWithId,
@@ -131,26 +140,42 @@ export function updateResourcePositions(
     }
 
     const assignment = assignments.find((item) => item.resourceId === platform.id);
-    if (!assignment) {
+    if (!assignment && !lockedBallisticMissileTarget) {
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
 
-    const targetPosition = getAssignmentTarget(
-      platform,
-      assignment,
-      cities,
-      enemyPlatforms,
-    );
+    const targetPosition =
+      lockedBallisticMissileTarget ??
+      (assignment
+        ? getAssignmentTarget(
+            platform,
+            assignment,
+            cities,
+            enemyPlatforms,
+          )
+        : undefined);
     if (!targetPosition) {
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
+
+    const lockedBallisticMissileMission =
+      platform.platformClass === "ballisticMissile" && platform.targetId
+        ? cities.some((city) => city.id === platform.targetId)
+          ? "reinforce"
+          : "intercept"
+        : undefined;
 
     return movePlatformTowards(
       {
         ...platform,
         status:
-          assignment.mission === "intercept" ? "intercepting" : "reinforcing",
-        targetId: assignment.targetId,
+          (lockedBallisticMissileMission ?? assignment?.mission) === "reinforce"
+            ? "reinforcing"
+            : "intercepting",
+        targetId:
+          platform.platformClass === "ballisticMissile" && platform.targetId
+            ? platform.targetId
+            : assignment?.targetId,
       },
       targetPosition,
       minimumDistanceToAssignmentTarget,

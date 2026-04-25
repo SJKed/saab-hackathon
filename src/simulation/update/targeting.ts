@@ -54,3 +54,25 @@ export function getAssignmentTarget(
 
   return cities.find((city) => city.id === assignment.targetId)?.position;
 }
+
+export function getLockedBallisticMissileTarget(
+  platform: MobilePlatform,
+  cities: AlliedCity[],
+  enemyPlatforms: MobilePlatform[],
+): Vector | undefined {
+  if (
+    platform.platformClass !== "ballisticMissile" ||
+    !platform.targetId
+  ) {
+    return undefined;
+  }
+
+  const enemyPlatform = enemyPlatforms.find(
+    (enemy) => enemy.id === platform.targetId,
+  );
+  if (enemyPlatform) {
+    return enemyPlatform.position;
+  }
+
+  return cities.find((city) => city.id === platform.targetId)?.position;
+}
