@@ -129,7 +129,6 @@ export function advanceSimulation(
     state.alliedCities,
     detectedEnemyPlatforms,
     state.alliedSpawnZones,
-    state.enemyBases,
     deltaSeconds,
     state.mapData.bounds,
     debugSettings,

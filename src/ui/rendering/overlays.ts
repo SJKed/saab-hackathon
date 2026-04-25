@@ -174,6 +174,117 @@ function drawDeployments(
   ctx.setLineDash([]);
 }
 
+function drawCommandOverlay(
+  ctx: CanvasRenderingContext2D,
+  data: EntityRenderData,
+): void {
+  const commandUi = data.commandUi;
+  if (!commandUi) {
+    return;
+  }
+
+  if (commandUi.selectedPlatformId) {
+    const platform = data.alliedPlatforms.find(
+      (item) => item.id === commandUi.selectedPlatformId,
+    );
+    if (platform) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(115, 210, 255, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(platform.position.x, platform.position.y, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  if (commandUi.selectedSpawnZoneId) {
+    const spawnZone = data.alliedSpawnZones.find(
+      (item) => item.id === commandUi.selectedSpawnZoneId,
+    );
+    if (spawnZone) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(76, 201, 240, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.rect(spawnZone.position.x - 16, spawnZone.position.y - 16, 32, 32);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  const validTargetIds = new Set(commandUi.validTargetIds ?? []);
+  if (validTargetIds.size > 0) {
+    ctx.save();
+    ctx.setLineDash([4, 5]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.9)";
+    ctx.fillStyle = "rgba(255, 209, 102, 0.08)";
+
+    for (const enemyPlatform of data.enemyPlatforms) {
+      if (!validTargetIds.has(enemyPlatform.id)) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.arc(enemyPlatform.position.x, enemyPlatform.position.y, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    for (const city of data.alliedCities) {
+      if (!validTargetIds.has(city.id)) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.arc(city.position.x, city.position.y, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (!commandUi.preview) {
+    return;
+  }
+
+  const previewColor = commandUi.preview.valid
+    ? commandUi.preview.mission === "intercept"
+      ? "rgba(255, 183, 3, 0.95)"
+      : commandUi.preview.mission === "recon"
+        ? "rgba(76, 201, 240, 0.95)"
+        : "rgba(116, 214, 128, 0.95)"
+    : "rgba(255, 107, 107, 0.95)";
+
+  ctx.save();
+  ctx.strokeStyle = previewColor;
+  ctx.fillStyle = previewColor;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 6]);
+  ctx.beginPath();
+  ctx.moveTo(commandUi.preview.start.x, commandUi.preview.start.y);
+  ctx.lineTo(commandUi.preview.end.x, commandUi.preview.end.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.arc(commandUi.preview.end.x, commandUi.preview.end.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  const labelX = (commandUi.preview.start.x + commandUi.preview.end.x) * 0.5;
+  const labelY = (commandUi.preview.start.y + commandUi.preview.end.y) * 0.5 - 10;
+  ctx.font = "12px Arial";
+  ctx.textAlign = "center";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(8, 12, 16, 0.92)";
+  ctx.strokeText(commandUi.preview.label, labelX, labelY);
+  ctx.fillStyle = previewColor;
+  ctx.fillText(commandUi.preview.label, labelX, labelY);
+  ctx.restore();
+}
+
 export function drawOperationalOverlays(
   ctx: CanvasRenderingContext2D,
   data: EntityRenderData,
@@ -194,6 +305,7 @@ export function drawOperationalOverlays(
       ) <= 5,
   );
   drawAssignments(ctx, data);
+  drawCommandOverlay(ctx, data);
   drawDeployments(
     ctx,
     data.enemyPlatforms,

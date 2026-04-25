@@ -7,6 +7,7 @@ import type {
   AlliedSpawnZone,
   EnemyBase,
   MobilePlatform,
+  Vector,
 } from "../../models/entity";
 
 export type CombatVisualEffect = {
@@ -43,4 +44,17 @@ export type EntityRenderData = {
   hoverPointWorld: { x: number; y: number } | null;
   hoverPointScreen: { x: number; y: number } | null;
   viewZoom: number;
+  commandUi?: {
+    selectedPlatformId?: string;
+    selectedSpawnZoneId?: string;
+    pendingMission?: "intercept" | "reinforce" | "recon";
+    validTargetIds?: string[];
+    preview?: {
+      mission: "intercept" | "reinforce" | "recon";
+      start: Vector;
+      end: Vector;
+      valid: boolean;
+      label: string;
+    };
+  };
 };

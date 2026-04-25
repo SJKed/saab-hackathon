@@ -177,7 +177,7 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   panel.appendChild(header);
 
   const title = document.createElement("strong");
-  title.textContent = "Operator Training";
+  title.textContent = "Command Fallback";
   setStyles(title, {
     color: "#f5f5f5",
     fontSize: "14px",
@@ -220,8 +220,8 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   content.appendChild(modeSummary);
 
   const commandSection = createSection(
-    "Manual deployment",
-    "Select a base asset, choose a mission, and issue a user-owned allied command.",
+    "Fallback command form",
+    "Use this form when you want precise dropdown control. The primary workflow now supports direct map-based commanding.",
   );
   const baseRow = createSelectRow("Base");
   const platformRow = createSelectRow("Platform");
@@ -541,8 +541,8 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
       latestHoverPointWorld = input.hoverPointWorld;
       modeSummary.textContent =
         input.commandMode === "training"
-          ? "Training mode active: allied deployments come from your commands, while AI recommendations remain advisory."
-          : "AI auto mode active: normal combat tasking stays AI-controlled, but recon drones can still be manually positioned.";
+          ? "Training mode active: allied deployments come from your commands, while AI recommendations remain advisory. You can now also click bases or airborne allied units on the map to issue commands directly."
+          : "AI auto mode active: normal combat tasking stays AI-controlled, but recon drones can still be manually positioned. You can click recon-capable allied assets on the map to issue those manual commands.";
 
       const baseOptions = input.alliedSpawnZones.map((base) => ({
         value: base.id,

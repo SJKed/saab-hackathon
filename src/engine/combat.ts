@@ -12,6 +12,7 @@ import { distanceKm, kmToRaw, pixelToWorldDistance } from "../models/distance";
 import type { DebugSettings } from "../models/debug";
 import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
+  canReconPlatformEngageTarget,
   canDroneSacrificeTarget,
   clonePlatform,
   getPlatformDisplayName,
@@ -23,6 +24,7 @@ import {
   getWeaponPayloadDamage,
   getWeaponShotInterval,
   getWeaponsForTarget,
+  isReconPlatform,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
@@ -1114,8 +1116,11 @@ function hasCompatiblePayload(
   targetType: TargetType,
 ): boolean {
   return (
+    canReconPlatformEngageTarget(platform, targetType) &&
+    (
     canDroneSacrificeTarget(platform, targetType) ||
     getWeaponsForTarget(platform, targetType).length > 0
+    )
   );
 }
 
@@ -1151,6 +1156,13 @@ function refreshEngagementPhase(
     return platform.combatPhaseTimeSeconds >= disengageWindowSeconds
       ? clearCombatState(platform)
       : platform;
+  }
+
+  if (!canReconPlatformEngageTarget(platform, targetType)) {
+    return setCombatPhase(platform, "disengaging", {
+      engagedWithId: target.id,
+      disengageReason: "Recon platform avoiding non-missile combat",
+    });
   }
 
   if (!hasCompatiblePayload(platform, targetType)) {
@@ -1348,6 +1360,20 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       }
 
       const distance = distanceKm(alliedPlatform.position, enemyPlatform.position);
+      if (
+        isReconPlatform(alliedPlatform) &&
+        !canReconPlatformEngageTarget(
+          alliedPlatform,
+          getPlatformTargetType(enemyPlatform),
+        )
+      ) {
+        alliedPlatforms[alliedIndex] = clearCombatState({
+          ...alliedPlatform,
+          status: alliedPlatform.status === "engaging" ? "transit" : alliedPlatform.status,
+          disengageReason: "Recon platform avoiding non-missile combat",
+        });
+        continue;
+      }
       const possibleRange = Math.max(
         getPlatformEngagementRange(
           alliedPlatform,

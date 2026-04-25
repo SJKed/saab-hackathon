@@ -50,7 +50,25 @@ function getPlatformInventorySummary(
 
 function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
   if (!data.hoverPointWorld) {
-    return [];
+    const items: TooltipItem[] = [];
+    if (data.commandUi?.pendingMission) {
+      items.push({
+        icon: "⌘",
+        title: "Command Mode",
+        lines: [
+          `Mission: ${
+            data.commandUi.pendingMission === "intercept"
+              ? "Intercept"
+              : data.commandUi.pendingMission === "recon"
+                ? "Recon"
+                : "Reinforce"
+          }`,
+          "Click a highlighted target or map point to confirm.",
+        ],
+      });
+    }
+
+    return items;
   }
 
   const items: TooltipItem[] = [];
@@ -261,6 +279,37 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
         ],
       });
     }
+  }
+
+  if (data.commandUi?.pendingMission) {
+    items.unshift({
+      icon: "⌘",
+      title: "Command Preview",
+      lines: data.commandUi.preview
+        ? [
+            `Mission: ${
+              data.commandUi.pendingMission === "intercept"
+                ? "Intercept"
+                : data.commandUi.pendingMission === "recon"
+                  ? "Recon"
+                  : "Reinforce"
+            }`,
+            data.commandUi.preview.label,
+            data.commandUi.preview.valid
+              ? "Click to confirm this command."
+              : "Current hover point is not a valid command target.",
+          ]
+        : [
+            `Mission: ${
+              data.commandUi.pendingMission === "intercept"
+                ? "Intercept"
+                : data.commandUi.pendingMission === "recon"
+                  ? "Recon"
+                  : "Reinforce"
+            }`,
+            "Move the cursor over a target to preview the command.",
+          ],
+    });
   }
 
   return items;

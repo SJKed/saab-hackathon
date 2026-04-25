@@ -67,6 +67,13 @@ export function canDroneSacrificeTarget(
   return isReconPlatform(platform) && targetType === "ballisticMissile";
 }
 
+export function canReconPlatformEngageTarget(
+  platform: MobilePlatform,
+  targetType: TargetType,
+): boolean {
+  return !isReconPlatform(platform) || targetType === "ballisticMissile";
+}
+
 export function getWeaponShotInterval(weapon: Weapon): number {
   const fireInterval = weapon.rateOfFire > epsilon ? 1 / weapon.rateOfFire : 0;
   return Math.max(fireInterval, weapon.reloadTime);
