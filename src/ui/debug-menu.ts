@@ -14,6 +14,7 @@ import {
 import { isPlatformDeployed, isPlatformStored } from "../models/platform-utils";
 
 type DebugMenuApi = {
+  root: HTMLElement;
   getState: () => DebugSettings;
   update: (input: {
     alliedSpawnZones: AlliedSpawnZone[];
@@ -436,6 +437,7 @@ export function createDebugMenu(container: HTMLElement): DebugMenuApi {
   }
 
   return {
+    root: panel,
     getState: () => cloneDebugSettings(state),
     update: (input) => {
       syncBaseRows(

@@ -5,6 +5,7 @@ import type { ResponsePlannerSnapshot } from "../engine/planning";
 import type { AlliedForcePostureSnapshot } from "../engine/posture";
 
 type InfoPanelApi = {
+  root: HTMLElement;
   update: (
     assignments: ResourceAssignment[],
     events: CombatLogEvent[],
@@ -625,6 +626,7 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     panel.style.top = `${panelRect.top - containerRect.top}px`;
     panel.style.right = "auto";
     panel.style.bottom = "auto";
+    panel.dataset.modalDetached = "true";
 
     dragOffsetX = event.clientX - panelRect.left;
     dragOffsetY = event.clientY - panelRect.top;
@@ -1042,6 +1044,7 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
   );
 
   return {
+    root: panel,
     update: render,
   };
 }

@@ -15,6 +15,7 @@ import {
 } from "../models/platform-utils";
 
 type TrainingPanelApi = {
+  root: HTMLElement;
   update: (input: {
     commandMode: CommandMode;
     alliedCities: AlliedCity[];
@@ -362,6 +363,7 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
     panel.style.left = `${panelRect.left - containerRect.left}px`;
     panel.style.top = `${panelRect.top - containerRect.top}px`;
     panel.style.right = "auto";
+    panel.dataset.modalDetached = "true";
 
     dragOffsetX = event.clientX - panelRect.left;
     dragOffsetY = event.clientY - panelRect.top;
@@ -412,6 +414,7 @@ export function createTrainingPanel(container: HTMLElement): TrainingPanelApi {
   syncCollapsedState();
 
   return {
+    root: panel,
     consumeDeployRequest: () => {
       const request = pendingDeployRequest;
       pendingDeployRequest = undefined;

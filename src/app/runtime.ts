@@ -16,6 +16,7 @@ import type { StrategyMode } from "../ui/controls";
 import { createControls } from "../ui/controls";
 import { createDebugMenu } from "../ui/debug-menu";
 import { createInfoPanel } from "../ui/info-panel";
+import { createModalRibbon } from "../ui/modal-ribbon";
 import { createMetricsHud } from "../ui/metrics-hud";
 import { createTrainingPanel } from "../ui/training-panel";
 import { drawTerrain, drawTooltip, renderEntities } from "../ui/renderer";
@@ -59,11 +60,37 @@ function drawGrid(
 }
 
 export function startSimulation(shell: AppShell): void {
-  const controls = createControls(shell.appElement);
-  const debugMenu = createDebugMenu(shell.appElement);
+  const modalRibbon = createModalRibbon(shell.appElement);
+  const controls = createControls(modalRibbon.workspace);
+  const debugMenu = createDebugMenu(modalRibbon.workspace);
   const metricsHud = createMetricsHud(shell.appElement);
-  const infoPanel = createInfoPanel(shell.appElement);
-  const trainingPanel = createTrainingPanel(shell.appElement);
+  const infoPanel = createInfoPanel(modalRibbon.workspace);
+  const trainingPanel = createTrainingPanel(modalRibbon.workspace);
+
+  modalRibbon.registerPanel({
+    id: "controls",
+    label: "Controls",
+    panel: controls.root,
+    defaultVisible: true,
+  });
+  modalRibbon.registerPanel({
+    id: "debug",
+    label: "Debug",
+    panel: debugMenu.root,
+    defaultVisible: false,
+  });
+  modalRibbon.registerPanel({
+    id: "explain",
+    label: "Explain",
+    panel: infoPanel.root,
+    defaultVisible: true,
+  });
+  modalRibbon.registerPanel({
+    id: "training",
+    label: "Training",
+    panel: trainingPanel.root,
+    defaultVisible: false,
+  });
 
   let state = createSimulationState({
     width: window.innerWidth,
