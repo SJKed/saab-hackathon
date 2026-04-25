@@ -32,6 +32,12 @@ export function buildRunSummary(
   highlights.push(
     `City integrity ended at ${Math.round(metrics.cityIntegrityPercent)}%.`,
   );
+  highlights.push(
+    `Spend delta ${metrics.spendDelta >= 0 ? "+" : ""}${metrics.spendDelta.toFixed(1)} | exchange ratio ${metrics.exchangeRatio.toFixed(2)}x.`,
+  );
+  highlights.push(
+    `Spend rate ${metrics.alliedSpendRatePerTick.toFixed(1)} / ${metrics.enemySpendRatePerTick.toFixed(1)} per tick (allied/enemy).`,
+  );
 
   return {
     scenarioId: scenario.id,
@@ -41,6 +47,6 @@ export function buildRunSummary(
     ticksElapsed: mission.ticksElapsed,
     generatedAt: Date.now(),
     metrics,
-    highlights: highlights.slice(0, 3),
+    highlights: highlights.slice(0, 5),
   };
 }

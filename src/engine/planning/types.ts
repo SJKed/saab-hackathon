@@ -27,6 +27,8 @@ export type PlannerActionCandidate = {
   interceptTimeSeconds?: number;
   confidence: number;
   expectedDamagePrevented: number;
+  expectedMissionCost: number;
+  expectedNetValue: number;
   reserveValuePreserved: number;
   switchingCost: number;
   scarcityCost: number;

@@ -24,7 +24,12 @@ export type CombatPhase =
   | "evading"
   | "repositioning"
   | "disengaging";
-export type TargetType = PlatformClass | "city" | "spawnZone" | "base";
+export type TargetType =
+  | PlatformClass
+  | "city"
+  | "spawnZone"
+  | "base"
+  | "radarStation";
 export type PlatformRole = "interceptor" | "strike" | "recon" | "patrol";
 
 export interface Vector {
@@ -39,6 +44,8 @@ export interface StaticObjective {
   maxHealth: number;
   health: number;
   defenseRating: number;
+  missileAmmunition?: number;
+  missileMaxAmmunition?: number;
 }
 
 export interface AlliedCity extends StaticObjective {
@@ -49,6 +56,11 @@ export interface AlliedCity extends StaticObjective {
 export interface AlliedSpawnZone extends StaticObjective {}
 
 export interface EnemyBase extends StaticObjective {}
+
+export interface AlliedRadarStation extends StaticObjective {
+  value: number;
+  isSensorActive: boolean;
+}
 
 export interface SensorProfile {
   sensorRange: number;

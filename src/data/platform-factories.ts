@@ -32,6 +32,9 @@ type PlatformTemplate = {
 };
 
 type PlatformInventory = Record<PlatformClass, number>;
+const fighterRapidFireMaxAmmo = 4;
+const fighterMissileMaxAmmo = 8;
+const fighterBombMaxAmmo = 3;
 
 const scaleDistance = (distance: number): number =>
   pixelToWorldDistance(distance);
@@ -96,7 +99,7 @@ const bombTemplate = (
   maxRange: scaleDistance(maxRange),
   accuracy: 0.78,
   guidanceType: "infrared",
-  targetTypesSupported: ["city", "spawnZone", "base"],
+  targetTypesSupported: ["city", "spawnZone", "base", "radarStation"],
   blastRadius: scaleDistance(18),
   salvoSize: 1,
   probabilityOfKillBase: 0.8,
@@ -151,13 +154,17 @@ const alliedFighterTemplate: PlatformTemplate = {
   weapons: [
     rapidFireTemplate(
       "Autocannon",
-      26,
+      fighterRapidFireMaxAmmo,
       11,
       0.74,
       54,
       ["fighterJet", "drone"],
     ),
-    airToAirMissileTemplate(4, ["fighterJet", "drone", "ballisticMissile"]),
+    airToAirMissileTemplate(
+      fighterMissileMaxAmmo,
+      ["fighterJet", "drone", "ballisticMissile"],
+    ),
+    bombTemplate("Strike Bomb Bay", fighterBombMaxAmmo, 40, 22),
   ],
 };
 
@@ -184,14 +191,6 @@ const alliedDroneTemplate: PlatformTemplate = {
     jamResistance: 0.55,
   },
   weapons: [
-    rapidFireTemplate(
-      "Stabilized Gun Pod",
-      18,
-      8,
-      0.68,
-      42,
-      ["drone", "ballisticMissile"],
-    ),
     airToAirMissileTemplate(2, ["drone", "ballisticMissile"]),
   ],
 };
@@ -224,7 +223,15 @@ const alliedBallisticMissileTemplate: PlatformTemplate = {
       110,
       10,
       18,
-      ["fighterJet", "drone", "ballisticMissile", "city", "spawnZone", "base"],
+      [
+        "fighterJet",
+        "drone",
+        "ballisticMissile",
+        "city",
+        "spawnZone",
+        "base",
+        "radarStation",
+      ],
     ),
   ],
   oneWay: true,
@@ -263,13 +270,17 @@ const enemyFighterTemplate: PlatformTemplate = {
   weapons: [
     rapidFireTemplate(
       "Forward Cannon",
-      24,
+      fighterRapidFireMaxAmmo,
       10,
       0.7,
       48,
       ["fighterJet", "drone"],
     ),
-    bombTemplate("Strike Bomb Bay", 2, 46, 24),
+    airToAirMissileTemplate(
+      fighterMissileMaxAmmo,
+      ["fighterJet", "drone", "ballisticMissile"],
+    ),
+    bombTemplate("Strike Bomb Bay", fighterBombMaxAmmo, 42, 24),
   ],
 };
 
@@ -303,14 +314,6 @@ const enemyDroneTemplate: PlatformTemplate = {
     jamResistance: 0.46,
   },
   weapons: [
-    rapidFireTemplate(
-      "Light Gun Mount",
-      16,
-      7,
-      0.64,
-      40,
-      ["drone"],
-    ),
     bombTemplate("Guided Charge", 1, 34, 18),
   ],
 };
@@ -334,7 +337,7 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
     sensorRange: scaleDistance(136),
     sensorType: "passive",
     trackingQuality: 0.62,
-    targetTypesSupported: ["city", "spawnZone", "base"],
+    targetTypesSupported: ["city", "spawnZone", "base", "radarStation"],
     jamResistance: 0.72,
   },
   weapons: [
@@ -343,7 +346,15 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
       118,
       10,
       20,
-      ["fighterJet", "drone", "ballisticMissile", "city", "spawnZone", "base"],
+      [
+        "fighterJet",
+        "drone",
+        "ballisticMissile",
+        "city",
+        "spawnZone",
+        "base",
+        "radarStation",
+      ],
     ),
   ],
   oneWay: true,

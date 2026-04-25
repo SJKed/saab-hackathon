@@ -2,6 +2,7 @@ import { allocateResources } from "../engine/allocation";
 import { resolveCombat } from "../engine/combat";
 import {
   calculateDetectionState,
+  getConfidentDetectedEnemyPlatforms,
   getDetectedEnemyPlatforms,
 } from "../engine/detection";
 import { coordinateEnemyDeployments } from "../engine/enemy-director";
@@ -59,12 +60,17 @@ export function advanceSimulation(
     enemyPlatforms,
     allocationDetectionState,
   );
+  const confidentEnemyPlatforms = getConfidentDetectedEnemyPlatforms(
+    detectedEnemyPlatforms,
+    allocationDetectionState,
+    0.4,
+  );
 
   const allocationResult = allocateResources(
     state.alliedCities,
     state.alliedSpawnZones,
     state.alliedPlatforms,
-    detectedEnemyPlatforms,
+    confidentEnemyPlatforms,
     state.alliedPostureMemory,
     deltaSeconds,
     debugSettings,
@@ -88,17 +94,11 @@ export function advanceSimulation(
     commandMode === "training"
       ? operatorAssignments
       : allocationResult.assignments;
-  const metricsState = updateMetricsState(
-    state.metricsState,
-    enemyPlatforms,
-    activeAssignments,
-    nextTick,
-  );
   let alliedPlatforms = updateResourcePositions(
     state.alliedPlatforms,
     activeAssignments,
     state.alliedCities,
-    detectedEnemyPlatforms,
+    confidentEnemyPlatforms,
     state.alliedSpawnZones,
     deltaSeconds,
     state.mapData.bounds,
@@ -126,6 +126,13 @@ export function advanceSimulation(
 
   alliedPlatforms = combatResolution.alliedPlatforms;
   enemyPlatforms = combatResolution.enemyPlatforms;
+  const metricsState = updateMetricsState(
+    state.metricsState,
+    enemyPlatforms,
+    activeAssignments,
+    combatResolution.events,
+    nextTick,
+  );
 
   const combatEffects =
     combatResolution.events.length > 0
@@ -149,7 +156,11 @@ export function advanceSimulation(
     ...state,
     alliedCities: calculateThreatsForCities(
       combatResolution.alliedCities,
-      getDetectedEnemyPlatforms(enemyPlatforms, detectionState),
+      getConfidentDetectedEnemyPlatforms(
+        getDetectedEnemyPlatforms(enemyPlatforms, detectionState),
+        detectionState,
+        0.3,
+      ),
     ),
     alliedSpawnZones: combatResolution.alliedSpawnZones,
     enemyBases: combatResolution.enemyBases,

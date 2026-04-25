@@ -6,6 +6,8 @@ export type RunComparison = {
   cityIntegrityDelta: number;
   neutralizedDelta: number;
   responseDelta: number | null;
+  spendDeltaShift: number;
+  exchangeRatioDelta: number;
 };
 
 export function compareRuns(
@@ -26,5 +28,9 @@ export function compareRuns(
       previousResponse === null || currentResponse === null
         ? null
         : currentResponse - previousResponse,
+    spendDeltaShift:
+      current.metrics.spendDelta - previous.metrics.spendDelta,
+    exchangeRatioDelta:
+      current.metrics.exchangeRatio - previous.metrics.exchangeRatio,
   };
 }

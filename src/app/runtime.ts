@@ -290,6 +290,7 @@ export function startSimulation(shell: AppShell): void {
         state.enemyPlatforms,
         state.alliedPlatforms,
         state.assignments,
+        state.enemyBases,
       ),
     );
     debugMenu.update({

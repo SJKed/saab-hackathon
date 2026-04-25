@@ -1,5 +1,16 @@
 import type { ResourceAssignment } from "./allocation";
-import type { AlliedCity, MobilePlatform } from "../models/entity";
+import type { CombatLogEvent } from "./combat";
+import {
+  accumulateEconomyFromCombatEvents,
+  buildPlatformEconomyCatalog,
+  createEconomyLedger,
+  getExchangeRatio,
+  getSpendDelta,
+  mergeEconomyLedger,
+  type EconomyLedger,
+  type PlatformEconomyProfile,
+} from "./economy";
+import type { AlliedCity, EnemyBase, MobilePlatform } from "../models/entity";
 import { isPlatformDeployed } from "../models/platform-utils";
 
 export type MetricsState = {
@@ -7,6 +18,12 @@ export type MetricsState = {
   initialCityHealth: number;
   initialEnemyCount: number;
   initialResourceCount: number;
+  initialCitySamCount: number;
+  initialEnemyBaseSamCount: number;
+  platformEconomyCatalog: Record<string, PlatformEconomyProfile>;
+  countedDestroyedPlatformIds: Set<string>;
+  economyLedger: EconomyLedger;
+  lastTickEconomyDelta: EconomyLedger;
   enemyDeploymentTicks: Record<string, number>;
   firstInterceptResponseTicks: Record<string, number>;
 };
@@ -24,6 +41,22 @@ export type MetricsSnapshot = {
   averageResponseTicks: number | null;
   activeInterceptCount: number;
   activeReinforcementCount: number;
+  citySamRemainingPercent: number;
+  citySamRemainingCount: number;
+  enemyBaseSamRemainingPercent: number;
+  enemyBaseSamRemainingCount: number;
+  alliedSpendTotal: number;
+  enemySpendTotal: number;
+  alliedSpendMunitions: number;
+  alliedSpendAttrition: number;
+  alliedSpendInfrastructure: number;
+  enemySpendMunitions: number;
+  enemySpendAttrition: number;
+  enemySpendInfrastructure: number;
+  spendDelta: number;
+  exchangeRatio: number;
+  alliedSpendRatePerTick: number;
+  enemySpendRatePerTick: number;
 };
 
 function sumHealth(units: { health: number }[]): number {
@@ -46,10 +79,20 @@ function getAverage(values: number[]): number | null {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+function sumMissiles(
+  units: Array<{ missileAmmunition?: number }>,
+): number {
+  return units.reduce(
+    (total, unit) => total + Math.max(0, unit.missileAmmunition ?? 0),
+    0,
+  );
+}
+
 export function createMetricsState(
   alliedCities: AlliedCity[],
   enemyPlatforms: MobilePlatform[],
   alliedPlatforms: MobilePlatform[],
+  enemyBases: EnemyBase[],
   _tick: number,
 ): MetricsState {
   return {
@@ -57,6 +100,15 @@ export function createMetricsState(
     initialCityHealth: sumHealth(alliedCities),
     initialEnemyCount: enemyPlatforms.length,
     initialResourceCount: alliedPlatforms.length,
+    initialCitySamCount: sumMissiles(alliedCities),
+    initialEnemyBaseSamCount: sumMissiles(enemyBases),
+    platformEconomyCatalog: buildPlatformEconomyCatalog([
+      ...alliedPlatforms,
+      ...enemyPlatforms,
+    ]),
+    countedDestroyedPlatformIds: new Set<string>(),
+    economyLedger: createEconomyLedger(),
+    lastTickEconomyDelta: createEconomyLedger(),
     enemyDeploymentTicks: {},
     firstInterceptResponseTicks: {},
   };
@@ -66,6 +118,7 @@ export function updateMetricsState(
   state: MetricsState,
   enemyPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
+  combatEvents: CombatLogEvent[],
   tick: number,
 ): MetricsState {
   const enemyDeploymentTicks = { ...state.enemyDeploymentTicks };
@@ -97,9 +150,18 @@ export function updateMetricsState(
 
     firstInterceptResponseTicks[assignment.targetId] = Math.max(0, tick - deploymentTick);
   }
+  const countedDestroyedPlatformIds = new Set(state.countedDestroyedPlatformIds);
+  const economyDelta = accumulateEconomyFromCombatEvents({
+    events: combatEvents,
+    platformCatalog: state.platformEconomyCatalog,
+    alreadyCountedDestroyedIds: countedDestroyedPlatformIds,
+  });
 
   return {
     ...state,
+    countedDestroyedPlatformIds,
+    economyLedger: mergeEconomyLedger(state.economyLedger, economyDelta.ledgerDelta),
+    lastTickEconomyDelta: economyDelta.ledgerDelta,
     enemyDeploymentTicks,
     firstInterceptResponseTicks,
   };
@@ -111,6 +173,7 @@ export function getMetricsSnapshot(
   enemyPlatforms: MobilePlatform[],
   alliedPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
+  enemyBases: EnemyBase[],
 ): MetricsSnapshot {
   const enemyNeutralizedCount = Math.max(
     0,
@@ -127,6 +190,8 @@ export function getMetricsSnapshot(
   const averageResponseTicks = getAverage(
     Object.values(state.firstInterceptResponseTicks),
   );
+  const citySamRemainingCount = sumMissiles(alliedCities);
+  const enemyBaseSamRemainingCount = sumMissiles(enemyBases);
 
   return {
     citiesProtectedPercent: clampPercent(
@@ -145,5 +210,25 @@ export function getMetricsSnapshot(
     averageResponseTicks,
     activeInterceptCount,
     activeReinforcementCount,
+    citySamRemainingPercent: clampPercent(
+      (citySamRemainingCount / Math.max(1, state.initialCitySamCount)) * 100,
+    ),
+    citySamRemainingCount,
+    enemyBaseSamRemainingPercent: clampPercent(
+      (enemyBaseSamRemainingCount / Math.max(1, state.initialEnemyBaseSamCount)) * 100,
+    ),
+    enemyBaseSamRemainingCount,
+    alliedSpendTotal: state.economyLedger.allied.total,
+    enemySpendTotal: state.economyLedger.enemy.total,
+    alliedSpendMunitions: state.economyLedger.allied.munitions,
+    alliedSpendAttrition: state.economyLedger.allied.attrition,
+    alliedSpendInfrastructure: state.economyLedger.allied.infrastructure,
+    enemySpendMunitions: state.economyLedger.enemy.munitions,
+    enemySpendAttrition: state.economyLedger.enemy.attrition,
+    enemySpendInfrastructure: state.economyLedger.enemy.infrastructure,
+    spendDelta: getSpendDelta(state.economyLedger),
+    exchangeRatio: getExchangeRatio(state.economyLedger),
+    alliedSpendRatePerTick: state.lastTickEconomyDelta.allied.total,
+    enemySpendRatePerTick: state.lastTickEconomyDelta.enemy.total,
   };
 }

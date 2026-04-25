@@ -32,6 +32,22 @@ const metrics: MetricsSnapshot = {
   averageResponseTicks: 4.2,
   activeInterceptCount: 1,
   activeReinforcementCount: 1,
+  citySamRemainingPercent: 75,
+  citySamRemainingCount: 90,
+  enemyBaseSamRemainingPercent: 60,
+  enemyBaseSamRemainingCount: 48,
+  alliedSpendTotal: 180,
+  enemySpendTotal: 240,
+  alliedSpendMunitions: 60,
+  alliedSpendAttrition: 100,
+  alliedSpendInfrastructure: 20,
+  enemySpendMunitions: 75,
+  enemySpendAttrition: 120,
+  enemySpendInfrastructure: 45,
+  spendDelta: -60,
+  exchangeRatio: 1.33,
+  alliedSpendRatePerTick: 8,
+  enemySpendRatePerTick: 12,
 };
 
 const mission: MissionStatus = {
@@ -52,6 +68,7 @@ describe("run summary and comparison", () => {
     });
     expect(summary.outcome).toBe("won");
     expect(summary.highlights.length).toBeGreaterThan(0);
+    expect(summary.highlights.join(" ")).toContain("Spend delta");
   });
 
   it("computes deltas between runs", () => {
@@ -62,11 +79,19 @@ describe("run summary and comparison", () => {
     const current = buildRunSummary(
       scenario,
       mission,
-      { ...metrics, cityIntegrityPercent: 80, enemyNeutralizedCount: 9 },
+      {
+        ...metrics,
+        cityIntegrityPercent: 80,
+        enemyNeutralizedCount: 9,
+        spendDelta: -20,
+        exchangeRatio: 1.5,
+      },
       { frames: [], events: [] },
     );
     const comparison = compareRuns(previous, current);
     expect(comparison.cityIntegrityDelta).toBeGreaterThan(0);
     expect(comparison.neutralizedDelta).toBe(2);
+    expect(comparison.spendDeltaShift).toBe(40);
+    expect(comparison.exchangeRatioDelta).toBeCloseTo(0.17, 2);
   });
 });

@@ -32,6 +32,7 @@ import {
   getSwitchingCost,
   scorePlannerCandidate,
 } from "./objective";
+import { estimatePlannerMissionCost } from "../economy";
 import type { EnemyIntentBelief, PlannerActionCandidate } from "./types";
 
 type CandidateGenerationResult = {
@@ -130,10 +131,16 @@ export function generatePlannerCandidates(input: {
         }
 
         const expectedDamagePrevented = enemyExpectedDamage;
+        const expectedMissionCost = estimatePlannerMissionCost({
+          platformClass: platform.platformClass,
+          mission: "intercept",
+          confidence: belief?.confidence ?? 0.5,
+        });
         const scarcityCost = getPlatformScarcityCost(platform, input.alliedPlatforms);
         const switchingCost = getSwitchingCost(platform);
         const reserveValuePreserved =
           getReserveValuePreserved(platform, input.postureSnapshot) * 0.25;
+        const expectedNetValue = expectedDamagePrevented - expectedMissionCost;
         const candidate: PlannerActionCandidate = {
           id: `intercept:${platform.id}:${enemyPlatform.id}`,
           mission: "intercept",
@@ -145,13 +152,16 @@ export function generatePlannerCandidates(input: {
           interceptTimeSeconds: intercept.timeToIntercept,
           confidence: belief?.confidence ?? 0.5,
           expectedDamagePrevented,
+          expectedMissionCost,
+          expectedNetValue,
           reserveValuePreserved,
           switchingCost,
           scarcityCost,
           baseScore: 0,
           rationale:
             `${getPlatformDisplayName(platform)} can intercept ${getPlatformDisplayName(enemyPlatform)} ` +
-            `before projected impact with ${(((belief?.confidence ?? 0.5) * 100)).toFixed(0)}% intent confidence.`,
+            `before projected impact with ${(((belief?.confidence ?? 0.5) * 100)).toFixed(0)}% intent confidence ` +
+            `(prevent ${expectedDamagePrevented.toFixed(1)} vs cost ${expectedMissionCost.toFixed(1)}).`,
           sourcePlatform: platform,
           targetCity,
         };
@@ -184,12 +194,18 @@ export function generatePlannerCandidates(input: {
         const distance = distanceWorld(platform.position, city.position);
         const expectedDamagePrevented =
           residualRisk * (0.45 + localCoverage * 0.22) + city.value * 0.8;
+        const expectedMissionCost = estimatePlannerMissionCost({
+          platformClass: platform.platformClass,
+          mission: "reinforce",
+          confidence: Math.max(0.42, Math.min(0.95, residualRisk / 8)),
+        });
         const scarcityCost = getPlatformScarcityCost(platform, input.alliedPlatforms) * 0.75;
         const switchingCost = getSwitchingCost(platform) * 0.85;
         const reserveValuePreserved = getReserveValuePreserved(
           platform,
           input.postureSnapshot,
         );
+        const expectedNetValue = expectedDamagePrevented - expectedMissionCost;
         const candidate: PlannerActionCandidate = {
           id: `reinforce:${platform.id}:${city.id}`,
           mission: "reinforce",
@@ -200,13 +216,15 @@ export function generatePlannerCandidates(input: {
           distance,
           confidence: Math.max(0.42, Math.min(0.95, residualRisk / 8)),
           expectedDamagePrevented,
+          expectedMissionCost,
+          expectedNetValue,
           reserveValuePreserved,
           switchingCost,
           scarcityCost,
           baseScore: 0,
           rationale:
             `${getPlatformDisplayName(platform)} improves the defensive screen over ${city.name ?? city.id} ` +
-            `where residual risk remains elevated.`,
+            `where residual risk remains elevated (prevent ${expectedDamagePrevented.toFixed(1)} vs cost ${expectedMissionCost.toFixed(1)}).`,
           sourcePlatform: platform,
           targetCity: city,
         };

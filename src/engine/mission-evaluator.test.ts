@@ -31,6 +31,22 @@ const metrics: MetricsSnapshot = {
   averageResponseTicks: null,
   activeInterceptCount: 0,
   activeReinforcementCount: 0,
+  citySamRemainingPercent: 100,
+  citySamRemainingCount: 120,
+  enemyBaseSamRemainingPercent: 100,
+  enemyBaseSamRemainingCount: 80,
+  alliedSpendTotal: 0,
+  enemySpendTotal: 0,
+  alliedSpendMunitions: 0,
+  alliedSpendAttrition: 0,
+  alliedSpendInfrastructure: 0,
+  enemySpendMunitions: 0,
+  enemySpendAttrition: 0,
+  enemySpendInfrastructure: 0,
+  spendDelta: 0,
+  exchangeRatio: 0,
+  alliedSpendRatePerTick: 0,
+  enemySpendRatePerTick: 0,
 };
 
 function createCities(count: number): AlliedCity[] {

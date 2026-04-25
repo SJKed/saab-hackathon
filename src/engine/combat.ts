@@ -1,5 +1,6 @@
 import type {
   AlliedCity,
+  AlliedRadarStation,
   AlliedSpawnZone,
   CombatPhase,
   EnemyBase,
@@ -29,10 +30,11 @@ import {
 } from "../models/platform-utils";
 import { getSensorEnvelope } from "./intercept";
 
-type ObjectiveUnit = AlliedCity | AlliedSpawnZone | EnemyBase;
+type ObjectiveUnit = AlliedCity | AlliedSpawnZone | AlliedRadarStation | EnemyBase;
 
 export type CombatUnitCategory =
   | "allied-city"
+  | "allied-radar-station"
   | "allied-spawn-zone"
   | "enemy-base"
   | "allied-platform"
@@ -65,6 +67,7 @@ export type CombatLogEvent = {
 
 export type CombatResolutionInput = {
   alliedCities: AlliedCity[];
+  alliedRadarStations?: AlliedRadarStation[];
   alliedSpawnZones: AlliedSpawnZone[];
   enemyBases: EnemyBase[];
   alliedPlatforms: MobilePlatform[];
@@ -76,6 +79,7 @@ export type CombatResolutionInput = {
 
 export type CombatResolutionResult = {
   alliedCities: AlliedCity[];
+  alliedRadarStations: AlliedRadarStation[];
   alliedSpawnZones: AlliedSpawnZone[];
   enemyBases: EnemyBase[];
   alliedPlatforms: MobilePlatform[];
@@ -105,6 +109,8 @@ const deadlockDistanceThreshold = 26;
 const orbitTimeoutSeconds = 1.9;
 const mergeDistanceThreshold = 18;
 const overshootClosureThreshold = 6;
+const staticSamRange = pixelToWorldDistance(165);
+const staticSamDamage = 34;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -335,6 +341,9 @@ function createStatusEvent(
 }
 
 function getObjectiveCategory(objective: ObjectiveUnit): CombatUnitCategory {
+  if ("isSensorActive" in objective) {
+    return "allied-radar-station";
+  }
   if ("value" in objective) {
     return "allied-city";
   }
@@ -701,6 +710,127 @@ function applyDamageToObjective<T extends ObjectiveUnit>(
   };
 }
 
+function applyStaticSamDefense(input: {
+  tick: number;
+  objectives: ObjectiveUnit[];
+  objectiveCategory: CombatUnitCategory;
+  targets: MobilePlatform[];
+  targetTeam: MobilePlatform["team"];
+  debugSettings: DebugSettings;
+  detectedEnemyIds?: Set<string>;
+}): { objectives: ObjectiveUnit[]; targets: MobilePlatform[]; events: CombatLogEvent[] } {
+  const objectives = [...input.objectives];
+  const targets = [...input.targets];
+  const events: CombatLogEvent[] = [];
+
+  for (let objectiveIndex = 0; objectiveIndex < objectives.length; objectiveIndex += 1) {
+    const objective = objectives[objectiveIndex];
+    if (objective.health <= 0 || (objective.missileAmmunition ?? 0) <= 0) {
+      continue;
+    }
+
+    let targetIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
+      if (
+        target.team !== input.targetTeam ||
+        isPlatformDestroyed(target) ||
+        isPlatformStored(target)
+      ) {
+        continue;
+      }
+      if (input.detectedEnemyIds && !input.detectedEnemyIds.has(target.id)) {
+        continue;
+      }
+      const distance = distanceKm(objective.position, target.position);
+      if (distance > staticSamRange || distance >= bestDistance) {
+        continue;
+      }
+      bestDistance = distance;
+      targetIndex = index;
+    }
+
+    if (targetIndex < 0) {
+      continue;
+    }
+
+    const target = targets[targetIndex];
+    const hitChance = clamp(
+      0.72 * (0.84 + target.combat.signature * 0.18) * (1 - target.combat.evasion * 0.36),
+      0.14,
+      0.94,
+    );
+    const hitRoll = getDeterministicRoll(
+      `${input.tick}:${objective.id}:${target.id}:static-sam-hit`,
+    );
+    const critRoll = getDeterministicRoll(
+      `${input.tick}:${objective.id}:${target.id}:static-sam-critical`,
+    );
+    const outcome: CombatOutcome =
+      hitRoll > hitChance ? "miss" : critRoll <= 0.12 ? "critical" : "hit";
+    const damage =
+      outcome === "miss"
+        ? 0
+        : staticSamDamage *
+          (outcome === "critical" ? 1.4 : 1) *
+          (input.objectiveCategory === "enemy-base"
+            ? input.debugSettings.enemyDamageMultiplier
+            : input.debugSettings.alliedDamageMultiplier);
+    const updatedTarget = damage > 0 ? applyDamageToPlatform(target, damage) : target;
+    const weapon: Weapon = {
+      id: `${objective.id}-static-sam`,
+      name: `${objective.name ?? objective.id} SAM`,
+      weaponClass: "surfaceToAirMissile",
+      ammunition: 1,
+      maxAmmunition: 1,
+      damagePerHit: staticSamDamage,
+      rateOfFire: 1,
+      reloadTime: 1,
+      cooldown: 0,
+      minRange: 0,
+      effectiveRange: staticSamRange * 0.7,
+      maxRange: staticSamRange,
+      accuracy: 0.72,
+      guidanceType: "radar",
+      targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
+      probabilityOfKillBase: 0.76,
+    };
+    events.push(
+      createExchangeEvent(
+        input.tick,
+        objective,
+        input.objectiveCategory,
+        objective.position,
+        updatedTarget,
+        target.team === "allied" ? "allied-platform" : "enemy-platform",
+        target.position,
+        weapon,
+        damage,
+        { outcome },
+      ),
+    );
+    if (updatedTarget.combat.durability <= 0 && damage > 0) {
+      events.push(
+        createDestroyedEvent(
+          input.tick,
+          updatedTarget,
+          target.team === "allied" ? "allied-platform" : "enemy-platform",
+          target.position,
+        ),
+      );
+    }
+
+    objectives[objectiveIndex] = {
+      ...objective,
+      missileAmmunition: Math.max(0, (objective.missileAmmunition ?? 0) - 1),
+    };
+    targets[targetIndex] = updatedTarget;
+  }
+
+  return { objectives, targets, events };
+}
+
 function resolvePlatformFire(
   tick: number,
   attacker: MobilePlatform,
@@ -1011,37 +1141,40 @@ function syncActiveEngagements(
   }
 }
 
-function findCityById(cities: AlliedCity[], cityId: string | undefined): AlliedCity | undefined {
-  if (!cityId) {
+function findObjectiveById<T extends ObjectiveUnit>(
+  objectives: T[],
+  objectiveId: string | undefined,
+): T | undefined {
+  if (!objectiveId) {
     return undefined;
   }
 
-  return cities.find((city) => city.id === cityId);
+  return objectives.find((objective) => objective.id === objectiveId);
 }
 
-function findClosestCity(
+function findClosestObjective<T extends ObjectiveUnit>(
   enemyPlatform: MobilePlatform,
-  cities: AlliedCity[],
-): AlliedCity | undefined {
+  objectives: T[],
+): T | undefined {
   if (enemyPlatform.targetId) {
-    const assignedCity = findCityById(cities, enemyPlatform.targetId);
-    if (assignedCity) {
-      return assignedCity;
+    const assignedObjective = findObjectiveById(objectives, enemyPlatform.targetId);
+    if (assignedObjective) {
+      return assignedObjective;
     }
   }
 
-  let closestCity: AlliedCity | undefined;
+  let closestObjective: T | undefined;
   let closestDistance = Number.POSITIVE_INFINITY;
 
-  for (const city of cities) {
-    const distance = distanceKm(enemyPlatform.position, city.position);
+  for (const objective of objectives) {
+    const distance = distanceKm(enemyPlatform.position, objective.position);
     if (distance < closestDistance) {
       closestDistance = distance;
-      closestCity = city;
+      closestObjective = objective;
     }
   }
 
-  return closestCity;
+  return closestObjective;
 }
 
 function hasCompatiblePayload(
@@ -1199,6 +1332,10 @@ function refreshEngagementPhase(
 
 export function resolveCombat(input: CombatResolutionInput): CombatResolutionResult {
   const alliedCities = input.alliedCities.map((city) => ({ ...city }));
+  const alliedRadarStations = (input.alliedRadarStations ?? []).map((station) => ({
+    ...station,
+    isSensorActive: station.health > 0,
+  }));
   const alliedSpawnZones = input.alliedSpawnZones.map((spawnZone) => ({ ...spawnZone }));
   const enemyBases = input.enemyBases.map((base) => ({ ...base }));
   const alliedPlatforms = input.alliedPlatforms.map(clonePlatform);
@@ -1207,6 +1344,39 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
   const events: CombatLogEvent[] = [];
 
   syncActiveEngagements(alliedPlatforms, enemyPlatforms);
+
+  const citySamDefense = applyStaticSamDefense({
+    tick: input.tick,
+    objectives: alliedCities,
+    objectiveCategory: "allied-city",
+    targets: enemyPlatforms,
+    targetTeam: "enemy",
+    debugSettings: input.debugSettings,
+    detectedEnemyIds,
+  });
+  for (let index = 0; index < alliedCities.length; index += 1) {
+    alliedCities[index] = citySamDefense.objectives[index] as AlliedCity;
+  }
+  for (let index = 0; index < enemyPlatforms.length; index += 1) {
+    enemyPlatforms[index] = citySamDefense.targets[index];
+  }
+  events.push(...citySamDefense.events);
+
+  const enemyBaseSamDefense = applyStaticSamDefense({
+    tick: input.tick,
+    objectives: enemyBases,
+    objectiveCategory: "enemy-base",
+    targets: alliedPlatforms,
+    targetTeam: "allied",
+    debugSettings: input.debugSettings,
+  });
+  for (let index = 0; index < enemyBases.length; index += 1) {
+    enemyBases[index] = enemyBaseSamDefense.objectives[index] as EnemyBase;
+  }
+  for (let index = 0; index < alliedPlatforms.length; index += 1) {
+    alliedPlatforms[index] = enemyBaseSamDefense.targets[index];
+  }
+  events.push(...enemyBaseSamDefense.events);
 
   for (let alliedIndex = 0; alliedIndex < alliedPlatforms.length; alliedIndex += 1) {
     const alliedPlatform = alliedPlatforms[alliedIndex];
@@ -1416,20 +1586,19 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
-    const targetCity = findClosestCity(enemyPlatform, alliedCities);
-    if (!targetCity) {
+    const objectives = [...alliedCities, ...alliedRadarStations];
+    const targetObjective = findClosestObjective(enemyPlatform, objectives);
+    if (!targetObjective) {
       continue;
     }
-
-    const cityIndex = alliedCities.findIndex((city) => city.id === targetCity.id);
-    if (cityIndex < 0) {
-      continue;
-    }
-
-    const distanceToCity = distanceKm(enemyPlatform.position, targetCity.position);
+    const isRadarStation = "isSensorActive" in targetObjective;
+    const distanceToCity = distanceKm(enemyPlatform.position, targetObjective.position);
     const payloadWeapon =
       enemyPlatform.oneWay
-        ? getPrimaryPayloadWeapon(enemyPlatform, "city") ??
+        ? getPrimaryPayloadWeapon(
+            enemyPlatform,
+            isRadarStation ? "radarStation" : "city",
+          ) ??
           getPrimaryPayloadWeapon(enemyPlatform)
         : undefined;
     if (
@@ -1444,11 +1613,26 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       const impact = resolveMissileImpact(
         input.tick,
         enemyPlatform,
-        targetCity,
+        targetObjective as AlliedCity,
         input.debugSettings,
       );
       enemyPlatforms[enemyIndex] = impact.missile;
-      alliedCities[cityIndex] = impact.city;
+      if (isRadarStation) {
+        const stationIndex = alliedRadarStations.findIndex(
+          (station) => station.id === targetObjective.id,
+        );
+        if (stationIndex >= 0) {
+          alliedRadarStations[stationIndex] = {
+            ...(impact.city as unknown as AlliedRadarStation),
+            isSensorActive: impact.city.health > 0,
+          };
+        }
+      } else {
+        const cityIndex = alliedCities.findIndex((city) => city.id === targetObjective.id);
+        if (cityIndex >= 0) {
+          alliedCities[cityIndex] = impact.city;
+        }
+      }
       events.push(...impact.events);
       continue;
     }
@@ -1460,13 +1644,100 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
     const strike = resolveObjectiveFire(
       input.tick,
       enemyPlatform,
-      targetCity,
-      "city",
+      targetObjective,
+      isRadarStation ? "radarStation" : "city",
       input.debugSettings,
     );
     enemyPlatforms[enemyIndex] = strike.updatedAttacker;
     if (strike.updatedTargetObjective) {
-      alliedCities[cityIndex] = strike.updatedTargetObjective as AlliedCity;
+      if (isRadarStation) {
+        const stationIndex = alliedRadarStations.findIndex(
+          (station) => station.id === targetObjective.id,
+        );
+        if (stationIndex >= 0) {
+          alliedRadarStations[stationIndex] = {
+            ...(strike.updatedTargetObjective as AlliedRadarStation),
+            isSensorActive: strike.updatedTargetObjective.health > 0,
+          };
+        }
+      } else {
+        const cityIndex = alliedCities.findIndex((city) => city.id === targetObjective.id);
+        if (cityIndex >= 0) {
+          alliedCities[cityIndex] = strike.updatedTargetObjective as AlliedCity;
+        }
+      }
+    }
+    if (strike.event) {
+      events.push(strike.event);
+    }
+    if (strike.destroyedEvent) {
+      events.push(strike.destroyedEvent);
+    }
+  }
+
+  // Allow allied strike-capable platforms to prosecute enemy bases when not tied up in air combat.
+  for (let alliedIndex = 0; alliedIndex < alliedPlatforms.length; alliedIndex += 1) {
+    const alliedPlatform = alliedPlatforms[alliedIndex];
+    if (
+      isPlatformDestroyed(alliedPlatform) ||
+      isPlatformStored(alliedPlatform) ||
+      alliedPlatform.engagedWithId
+    ) {
+      continue;
+    }
+
+    const targetBase = findClosestObjective(alliedPlatform, enemyBases);
+    if (!targetBase) {
+      continue;
+    }
+
+    const distanceToBase = distanceKm(alliedPlatform.position, targetBase.position);
+    const payloadWeapon = alliedPlatform.oneWay
+      ? getPrimaryPayloadWeapon(alliedPlatform, "base") ??
+        getPrimaryPayloadWeapon(alliedPlatform)
+      : undefined;
+
+    if (
+      alliedPlatform.platformClass === "ballisticMissile" &&
+      payloadWeapon &&
+      distanceToBase <=
+        Math.max(
+          minimumStrikeDistance,
+          getWeaponBlastRadius(payloadWeapon) || payloadWeapon.maxRange,
+        )
+    ) {
+      const impact = resolveMissileImpact(
+        input.tick,
+        alliedPlatform,
+        targetBase as unknown as AlliedCity,
+        input.debugSettings,
+      );
+      alliedPlatforms[alliedIndex] = impact.missile;
+      const baseIndex = enemyBases.findIndex((base) => base.id === targetBase.id);
+      if (baseIndex >= 0) {
+        enemyBases[baseIndex] = impact.city as unknown as EnemyBase;
+      }
+      events.push(...impact.events);
+      continue;
+    }
+
+    if (distanceToBase > minimumStrikeDistance + cityStrikeEnvelopeBuffer) {
+      continue;
+    }
+
+    const strike = resolveObjectiveFire(
+      input.tick,
+      alliedPlatform,
+      targetBase,
+      "base",
+      input.debugSettings,
+    );
+    alliedPlatforms[alliedIndex] = strike.updatedAttacker;
+    if (strike.updatedTargetObjective) {
+      const baseIndex = enemyBases.findIndex((base) => base.id === targetBase.id);
+      if (baseIndex >= 0) {
+        enemyBases[baseIndex] = strike.updatedTargetObjective as EnemyBase;
+      }
     }
     if (strike.event) {
       events.push(strike.event);
@@ -1478,6 +1749,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
 
   return {
     alliedCities: alliedCities.filter((city) => city.health > 0),
+    alliedRadarStations: alliedRadarStations.filter((station) => station.health > 0),
     alliedSpawnZones: alliedSpawnZones.filter((spawnZone) => spawnZone.health > 0),
     enemyBases: enemyBases.filter((base) => base.health > 0),
     alliedPlatforms: alliedPlatforms.filter(

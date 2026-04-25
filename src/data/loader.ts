@@ -216,6 +216,8 @@ function normalizeAlliedCity(
     maxHealth: 260,
     health: 260,
     defenseRating: 0.22,
+    missileAmmunition: 40,
+    missileMaxAmmunition: 40,
   };
 }
 
@@ -242,6 +244,8 @@ function normalizeEnemyBase(
     maxHealth: 240,
     health: 240,
     defenseRating: 0.18,
+    missileAmmunition: 40,
+    missileMaxAmmunition: 40,
   };
 }
 

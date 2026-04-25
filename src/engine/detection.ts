@@ -1,5 +1,6 @@
 import type {
   AlliedCity,
+  AlliedRadarStation,
   AlliedSpawnZone,
   MobilePlatform,
   SensorProfile,
@@ -19,7 +20,7 @@ import {
 } from "../models/distance";
 import { getSensorEnvelope } from "./intercept";
 
-export type DetectionSourceKind = "fixed-radar" | "platform-sensor";
+export type DetectionSourceKind = "fixed-radar" | "platform-sensor" | "passive-sensor";
 
 export type DetectionSource = {
   id: string;
@@ -38,6 +39,8 @@ export type LastKnownEnemyContact = {
   lastDetectedTick: number;
   detectedBy: string;
   staleTicks: number;
+  confidence?: number;
+  trackingQuality?: number;
 };
 
 export type DetectionState = {
@@ -77,13 +80,16 @@ function isEligibleAirborneDetector(platform: MobilePlatform): boolean {
   return (
     platform.team === "allied" &&
     isPlatformDeployed(platform) &&
-    (platform.role === "recon" || platform.sensors.sensorType === "radar")
+    (platform.role === "recon" ||
+      platform.sensors.sensorType === "radar" ||
+      platform.sensors.sensorType === "passive")
   );
 }
 
 function getFixedRadarSources(
   alliedCities: AlliedCity[],
   alliedSpawnZones: AlliedSpawnZone[],
+  alliedRadarStations: AlliedRadarStation[],
 ): DetectionSource[] {
   return [
     ...alliedCities.map((city) => ({
@@ -100,6 +106,15 @@ function getFixedRadarSources(
         position: cloneVector(spawnZone.position),
         sensorRangeWorld: fixedRadarProfile.sensorRange,
       })),
+    ...alliedRadarStations
+      .filter((station) => station.health > 0 && station.isSensorActive)
+      .map((station) => ({
+        id: `fixed-radar:${station.id}`,
+        name: `${station.name ?? station.id} radar`,
+        kind: "fixed-radar" as const,
+        position: cloneVector(station.position),
+        sensorRangeWorld: fixedRadarProfile.sensorRange,
+      })),
   ];
 }
 
@@ -109,16 +124,24 @@ function getPlatformSensorSources(
   return alliedPlatforms.filter(isEligibleAirborneDetector).map((platform) => ({
     id: `platform-sensor:${platform.id}`,
     name: `${getPlatformDisplayName(platform)} ${platform.sensors.sensorType}`,
-    kind: "platform-sensor",
+    kind:
+      platform.sensors.sensorType === "passive"
+        ? "passive-sensor"
+        : "platform-sensor",
     position: cloneVector(platform.position),
     sensorRangeWorld: platform.sensors.sensorRange,
   }));
+}
+
+function enemyEmitsRadar(enemyPlatform: MobilePlatform): boolean {
+  return enemyPlatform.sensors.sensorType === "radar" && isPlatformDeployed(enemyPlatform);
 }
 
 function detectWithFixedRadar(
   enemyPlatform: MobilePlatform,
   alliedCities: AlliedCity[],
   alliedSpawnZones: AlliedSpawnZone[],
+  alliedRadarStations: AlliedRadarStation[],
 ): string | undefined {
   const targetType = getPlatformTargetType(enemyPlatform);
   if (!fixedRadarCanSenseTarget(targetType)) {
@@ -126,7 +149,7 @@ function detectWithFixedRadar(
   }
 
   const envelope = getFixedRadarEnvelope(enemyPlatform);
-  const fixedObjectives = [...alliedCities, ...alliedSpawnZones];
+  const fixedObjectives = [...alliedCities, ...alliedSpawnZones, ...alliedRadarStations];
 
   for (const objective of fixedObjectives) {
     if (distanceWorld(objective.position, enemyPlatform.position) <= envelope) {
@@ -150,12 +173,17 @@ function detectWithPlatformSensor(
     ) {
       continue;
     }
+    if (alliedPlatform.sensors.sensorType === "passive" && !enemyEmitsRadar(enemyPlatform)) {
+      continue;
+    }
 
     if (
       distanceWorld(alliedPlatform.position, enemyPlatform.position) <=
       getSensorEnvelope(alliedPlatform, enemyPlatform)
     ) {
-      return getPlatformDisplayName(alliedPlatform);
+      return alliedPlatform.sensors.sensorType === "passive"
+        ? `${getPlatformDisplayName(alliedPlatform)} passive intercept`
+        : getPlatformDisplayName(alliedPlatform);
     }
   }
 
@@ -177,11 +205,13 @@ export function createDetectionState(): DetectionState {
 export function calculateDetectionState(input: {
   alliedCities: AlliedCity[];
   alliedSpawnZones: AlliedSpawnZone[];
+  alliedRadarStations?: AlliedRadarStation[];
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
   previousState: DetectionState;
   tick: number;
 }): DetectionState {
+  const alliedRadarStations = input.alliedRadarStations ?? [];
   const detectedEnemyIds: string[] = [];
   const previousContactsById = new Map(
     input.previousState.lastKnownEnemyContacts.map((contact) => [
@@ -201,6 +231,7 @@ export function calculateDetectionState(input: {
         enemyPlatform,
         input.alliedCities,
         input.alliedSpawnZones,
+        alliedRadarStations,
       ) ?? detectWithPlatformSensor(enemyPlatform, input.alliedPlatforms);
 
     if (detectedBy) {
@@ -214,17 +245,29 @@ export function calculateDetectionState(input: {
         lastDetectedTick: input.tick,
         detectedBy,
         staleTicks: 0,
+        confidence: 1,
+        trackingQuality: 1,
       });
       continue;
     }
 
     const previousContact = previousContactsById.get(enemyPlatform.id);
     if (previousContact) {
+      const staleTicks = Math.max(0, input.tick - previousContact.lastDetectedTick);
+      const confidence = Math.max(
+        0.05,
+        (previousContact.confidence ?? 1) * Math.pow(0.9, staleTicks),
+      );
+      if (confidence >= 0.35) {
+        detectedEnemyIds.push(enemyPlatform.id);
+      }
       nextContactsById.set(enemyPlatform.id, {
         ...previousContact,
         position: cloneVector(previousContact.position),
         velocity: cloneVector(previousContact.velocity),
-        staleTicks: Math.max(0, input.tick - previousContact.lastDetectedTick),
+        staleTicks,
+        confidence,
+        trackingQuality: previousContact.trackingQuality ?? 1,
       });
     }
   }
@@ -233,7 +276,7 @@ export function calculateDetectionState(input: {
     detectedEnemyIds,
     lastKnownEnemyContacts: [...nextContactsById.values()],
     detectionSources: [
-      ...getFixedRadarSources(input.alliedCities, input.alliedSpawnZones),
+      ...getFixedRadarSources(input.alliedCities, input.alliedSpawnZones, alliedRadarStations),
       ...getPlatformSensorSources(input.alliedPlatforms),
     ],
   };
@@ -247,5 +290,21 @@ export function getDetectedEnemyPlatforms(
 
   return enemyPlatforms.filter((enemyPlatform) =>
     detectedEnemyIds.has(enemyPlatform.id),
+  );
+}
+
+export function getConfidentDetectedEnemyPlatforms(
+  enemyPlatforms: MobilePlatform[],
+  detectionState: DetectionState,
+  minConfidence: number,
+): MobilePlatform[] {
+  const confidenceById = new Map(
+    detectionState.lastKnownEnemyContacts.map((contact) => [
+      contact.enemyId,
+      contact.confidence ?? 1,
+    ]),
+  );
+  return enemyPlatforms.filter(
+    (platform) => (confidenceById.get(platform.id) ?? 0) >= minConfidence,
   );
 }

@@ -4,6 +4,7 @@ import type { PlannerActionCandidate } from "./types";
 
 export type PlanningObjectiveWeights = {
   preventedDamage: number;
+  missionCost: number;
   reservePreservation: number;
   scarcity: number;
   switching: number;
@@ -12,6 +13,7 @@ export type PlanningObjectiveWeights = {
 
 export const defaultPlanningWeights: PlanningObjectiveWeights = {
   preventedDamage: 1.2,
+  missionCost: 0.26,
   reservePreservation: 0.55,
   scarcity: 0.7,
   switching: 0.65,
@@ -56,6 +58,7 @@ export function scorePlannerCandidate(
   candidate: Pick<
     PlannerActionCandidate,
     | "expectedDamagePrevented"
+    | "expectedMissionCost"
     | "reserveValuePreserved"
     | "scarcityCost"
     | "switchingCost"
@@ -65,6 +68,7 @@ export function scorePlannerCandidate(
 ): number {
   return (
     candidate.expectedDamagePrevented * weights.preventedDamage +
+    -candidate.expectedMissionCost * weights.missionCost +
     candidate.reserveValuePreserved * weights.reservePreservation +
     (candidate.targetCity?.value ?? 0) * weights.cityValue -
     candidate.scarcityCost * weights.scarcity -

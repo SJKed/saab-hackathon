@@ -61,7 +61,9 @@ export function createAfterActionSummary(container: HTMLElement): AfterActionSum
     kpis.textContent =
       `Cities protected ${summary.metrics.protectedCityCount}/${summary.metrics.totalCityCount} | ` +
       `Integrity ${Math.round(summary.metrics.cityIntegrityPercent)}% | ` +
-      `Enemy neutralized ${summary.metrics.enemyNeutralizedCount}/${summary.metrics.totalEnemyCount}`;
+      `Enemy neutralized ${summary.metrics.enemyNeutralizedCount}/${summary.metrics.totalEnemyCount} | ` +
+      `Spend delta ${summary.metrics.spendDelta >= 0 ? "+" : ""}${summary.metrics.spendDelta.toFixed(1)} | ` +
+      `Exchange ${summary.metrics.exchangeRatio.toFixed(2)}x`;
     setStyles(kpis, { fontSize: "12px", color: "#c7d5da", marginBottom: "8px" });
     card.appendChild(kpis);
 
@@ -76,7 +78,9 @@ export function createAfterActionSummary(container: HTMLElement): AfterActionSum
       const compare = document.createElement("div");
       compare.textContent =
         `Vs previous run: integrity ${comparison.cityIntegrityDelta >= 0 ? "+" : ""}${comparison.cityIntegrityDelta.toFixed(1)}%, ` +
-        `neutralized ${comparison.neutralizedDelta >= 0 ? "+" : ""}${comparison.neutralizedDelta}.`;
+        `neutralized ${comparison.neutralizedDelta >= 0 ? "+" : ""}${comparison.neutralizedDelta}, ` +
+        `spend delta shift ${comparison.spendDeltaShift >= 0 ? "+" : ""}${comparison.spendDeltaShift.toFixed(1)}, ` +
+        `exchange ${comparison.exchangeRatioDelta >= 0 ? "+" : ""}${comparison.exchangeRatioDelta.toFixed(2)}x.`;
       setStyles(compare, { marginTop: "10px", fontSize: "12px", color: "#9fb6be" });
       card.appendChild(compare);
     }

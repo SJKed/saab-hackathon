@@ -189,6 +189,7 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
       alliedCities,
       enemyPlatforms,
       alliedPlatforms,
+      enemyBases,
       0,
     ),
     simulationTick: 0,

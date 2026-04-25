@@ -42,6 +42,10 @@ function formatPercent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
+function formatSpend(value: number): string {
+  return `$${Math.round(value)}`;
+}
+
 function getPercentTone(value: number): HudTone {
   if (value >= 80) {
     return goodTone;
@@ -98,6 +102,56 @@ function getResponseTone(responseTicks: number | null): HudTone {
     return warningTone;
   }
 
+  return dangerTone;
+}
+
+function getSamTone(percent: number): HudTone {
+  if (percent >= 60) {
+    return goodTone;
+  }
+  if (percent >= 30) {
+    return warningTone;
+  }
+  return dangerTone;
+}
+
+function getSpendTone(spend: number): HudTone {
+  if (spend <= 150) {
+    return goodTone;
+  }
+  if (spend <= 350) {
+    return warningTone;
+  }
+  return dangerTone;
+}
+
+function getSpendDeltaTone(delta: number): HudTone {
+  if (delta <= -25) {
+    return goodTone;
+  }
+  if (delta <= 40) {
+    return warningTone;
+  }
+  return dangerTone;
+}
+
+function getExchangeTone(ratio: number): HudTone {
+  if (ratio >= 1.3) {
+    return goodTone;
+  }
+  if (ratio >= 0.9) {
+    return warningTone;
+  }
+  return dangerTone;
+}
+
+function getRateTone(rate: number): HudTone {
+  if (rate <= 8) {
+    return goodTone;
+  }
+  if (rate <= 20) {
+    return warningTone;
+  }
   return dangerTone;
 }
 
@@ -218,12 +272,26 @@ export function createMetricsHud(container: HTMLElement): HudApi {
   const enemyNeutralized = createMetricCard("Enemy Neutralized");
   const resourceEfficiency = createMetricCard("Efficiency");
   const responseTime = createMetricCard("Avg Response");
+  const citySam = createMetricCard("City SAM");
+  const enemySam = createMetricCard("Enemy Base SAM");
+  const alliedSpend = createMetricCard("Allied Spend");
+  const enemySpend = createMetricCard("Enemy Spend");
+  const spendDelta = createMetricCard("Spend Delta");
+  const exchangeRatio = createMetricCard("Exchange");
+  const spendRate = createMetricCard("Spend Rate");
   const cards = [
     cityProtection,
     cityIntegrity,
     enemyNeutralized,
     resourceEfficiency,
     responseTime,
+    citySam,
+    enemySam,
+    alliedSpend,
+    enemySpend,
+    spendDelta,
+    exchangeRatio,
+    spendRate,
   ];
 
   for (const card of cards) {
@@ -256,6 +324,39 @@ export function createMetricsHud(container: HTMLElement): HudApi {
         : `${metrics.averageResponseTicks.toFixed(1)}t`;
     responseTime.detail.textContent = `${metrics.activeReinforcementCount} reinforcements`;
     applyTone(responseTime, getResponseTone(metrics.averageResponseTicks));
+
+    citySam.value.textContent = formatPercent(metrics.citySamRemainingPercent);
+    citySam.detail.textContent = `${metrics.citySamRemainingCount} missiles remaining`;
+    applyTone(citySam, getSamTone(metrics.citySamRemainingPercent));
+
+    enemySam.value.textContent = formatPercent(metrics.enemyBaseSamRemainingPercent);
+    enemySam.detail.textContent = `${metrics.enemyBaseSamRemainingCount} missiles remaining`;
+    applyTone(enemySam, getSamTone(metrics.enemyBaseSamRemainingPercent));
+
+    alliedSpend.value.textContent = formatSpend(metrics.alliedSpendTotal);
+    alliedSpend.detail.textContent = `M ${Math.round(metrics.alliedSpendMunitions)} | A ${Math.round(metrics.alliedSpendAttrition)} | I ${Math.round(metrics.alliedSpendInfrastructure)}`;
+    applyTone(alliedSpend, getSpendTone(metrics.alliedSpendTotal));
+
+    enemySpend.value.textContent = formatSpend(metrics.enemySpendTotal);
+    enemySpend.detail.textContent = `M ${Math.round(metrics.enemySpendMunitions)} | A ${Math.round(metrics.enemySpendAttrition)} | I ${Math.round(metrics.enemySpendInfrastructure)}`;
+    applyTone(enemySpend, getSpendTone(metrics.enemySpendTotal));
+
+    spendDelta.value.textContent = `${metrics.spendDelta >= 0 ? "+" : ""}${Math.round(metrics.spendDelta)}`;
+    spendDelta.detail.textContent = "allied minus enemy";
+    applyTone(spendDelta, getSpendDeltaTone(metrics.spendDelta));
+
+    exchangeRatio.value.textContent = `${metrics.exchangeRatio.toFixed(2)}x`;
+    exchangeRatio.detail.textContent = "enemy spend per allied spend";
+    applyTone(exchangeRatio, getExchangeTone(metrics.exchangeRatio));
+
+    spendRate.value.textContent = `${metrics.alliedSpendRatePerTick.toFixed(1)} / ${metrics.enemySpendRatePerTick.toFixed(1)}`;
+    spendRate.detail.textContent = "allied/enemy spend per tick";
+    applyTone(
+      spendRate,
+      getRateTone(
+        (metrics.alliedSpendRatePerTick + metrics.enemySpendRatePerTick) / 2,
+      ),
+    );
   }
 
   return { update };

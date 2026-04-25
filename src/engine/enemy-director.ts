@@ -1,5 +1,6 @@
 import type {
   AlliedCity,
+  AlliedSpawnZone,
   EnemyBase,
   MobilePlatform,
   PlatformClass,
@@ -17,6 +18,10 @@ import {
   isPlatformDestroyed,
   isPlatformStored,
 } from "../models/platform-utils";
+import {
+  allocateResources,
+  type ResourceAssignment,
+} from "./allocation";
 import {
   applyPostureMemory,
   createTeamPostureMemory,
@@ -74,6 +79,7 @@ export type EnemyDirectorSnapshot = {
 export type EnemyDirectorState = {
   baseStates: Record<string, BaseDirectorState>;
   postureMemory: TeamPostureMemory;
+  allocationPostureMemory: TeamPostureMemory;
   snapshot: EnemyDirectorSnapshot;
 };
 
@@ -86,6 +92,51 @@ const ticksPerSecond = 4;
 const initialLaunchTick = 4;
 const baseLaunchStaggerTicks = 6;
 const maxRecentLaunches = 6;
+
+function toMirrorDebugSettingsForEnemy(debugSettings: DebugSettings): DebugSettings {
+  return {
+    ...debugSettings,
+    disabledAlliedBaseIds: [...debugSettings.disabledEnemyBaseIds],
+  };
+}
+
+function toEnemyDecisionCities(enemyBases: EnemyBase[], alliedPlatforms: MobilePlatform[]): AlliedCity[] {
+  return enemyBases.map((base) => {
+    const inboundThreat = alliedPlatforms.filter((platform) => {
+      if (!isPlatformDeployed(platform)) {
+        return false;
+      }
+      const distance = distanceKm(platform.position, base.position);
+      return distance <= targetSelectionProximityScale;
+    }).length;
+
+    return {
+      ...base,
+      value: 12,
+      threat: Math.min(1, inboundThreat / 4),
+    };
+  });
+}
+
+function toEnemyDecisionSpawnZones(enemyBases: EnemyBase[]): AlliedSpawnZone[] {
+  return enemyBases.map((base) => ({
+    ...base,
+  }));
+}
+
+function toEnemyDecisionResources(enemyPlatforms: MobilePlatform[]): MobilePlatform[] {
+  return enemyPlatforms.map((platform) => ({
+    ...platform,
+    team: "allied",
+  }));
+}
+
+function toEnemyDecisionThreats(alliedPlatforms: MobilePlatform[]): MobilePlatform[] {
+  return alliedPlatforms.map((platform) => ({
+    ...platform,
+    team: "enemy",
+  }));
+}
 
 function getAggressionProfileForTier(
   tier: EnemyAggressionTier,
@@ -492,6 +543,7 @@ export function createEnemyDirectorState(
   return {
     baseStates,
     postureMemory,
+    allocationPostureMemory: createTeamPostureMemory(),
     snapshot: {
       aggressionTier: "opening",
       aggressionLabel: "Opening Probe",
@@ -531,6 +583,20 @@ export function coordinateEnemyDeployments(
   debugSettings: DebugSettings,
 ): CoordinateEnemyDeploymentsResult {
   const profile = getAggressionProfile(tick, enemyBases.length, debugSettings);
+  const decisionAllocation = allocateResources(
+    toEnemyDecisionCities(enemyBases, alliedPlatforms),
+    toEnemyDecisionSpawnZones(enemyBases),
+    toEnemyDecisionResources(enemyPlatforms),
+    toEnemyDecisionThreats(alliedPlatforms),
+    state.allocationPostureMemory,
+    deltaSeconds,
+    toMirrorDebugSettingsForEnemy(debugSettings),
+  );
+  const enemyAssignmentsByResourceId = new Map<string, ResourceAssignment>(
+    decisionAllocation.assignments
+      .filter((assignment) => assignment.mission === "intercept")
+      .map((assignment) => [assignment.resourceId, assignment]),
+  );
   const cityExposureScores = getTopCityExposureScores(
     alliedCities,
     alliedPlatforms,
@@ -600,18 +666,28 @@ export function coordinateEnemyDeployments(
       continue;
     }
 
-    const targetCityExposure = selectTargetCity(
-      enemyBase,
-      baseState,
-      alliedCities,
-      cityExposureScores,
-    );
-    if (!targetCityExposure) {
+    const assignmentDrivenPlatforms = storedPlatforms
+      .map((platform) => ({
+        platform,
+        assignment: enemyAssignmentsByResourceId.get(platform.id),
+      }))
+      .filter(
+        (
+          entry,
+        ): entry is { platform: MobilePlatform; assignment: ResourceAssignment } =>
+          Boolean(entry.assignment),
+      )
+      .slice(0, Math.max(1, Math.min(availableSlots, profile.maxWaveSize)));
+
+    const targetCityExposure = selectTargetCity(enemyBase, baseState, alliedCities, cityExposureScores);
+    if (!targetCityExposure && assignmentDrivenPlatforms.length === 0) {
       updatedBaseStates[enemyBase.id] = baseState;
       continue;
     }
 
-    const targetCityPosture = postureByCityId.get(targetCityExposure.cityId);
+    const targetCityPosture = targetCityExposure
+      ? postureByCityId.get(targetCityExposure.cityId)
+      : undefined;
     if (
       postureSnapshot.recallPressureActive &&
       !postureSnapshot.launchReleaseActive &&
@@ -624,23 +700,20 @@ export function coordinateEnemyDeployments(
       continue;
     }
 
-    const waveSize = getWaveSize(
-      profile,
-      baseState,
-      tick,
-      availableSlots,
-      storedPlatforms.length,
-    );
-    const demandLimitedWaveSize = Math.max(
-      1,
-      Math.ceil((targetCityPosture?.unmetPressure ?? targetCityExposure.exposure) / 1.85),
-    );
-    const selectedPlatforms = selectPlatformsForWave(
-      storedPlatforms,
-      profile,
-      Math.min(waveSize, demandLimitedWaveSize),
-      targetCityExposure,
-    );
+    const waveSize = getWaveSize(profile, baseState, tick, availableSlots, storedPlatforms.length);
+    const demandLimitedWaveSize = targetCityExposure
+      ? Math.max(1, Math.ceil((targetCityPosture?.unmetPressure ?? targetCityExposure.exposure) / 1.85))
+      : waveSize;
+    const selectedPlatforms = assignmentDrivenPlatforms.length > 0
+      ? assignmentDrivenPlatforms.map((entry) => entry.platform).slice(0, Math.min(waveSize, demandLimitedWaveSize))
+      : targetCityExposure
+        ? selectPlatformsForWave(
+            storedPlatforms,
+            profile,
+            Math.min(waveSize, demandLimitedWaveSize),
+            targetCityExposure,
+          )
+        : [];
     if (selectedPlatforms.length === 0) {
       updatedBaseStates[enemyBase.id] = {
         ...baseState,
@@ -650,18 +723,30 @@ export function coordinateEnemyDeployments(
     }
 
     const launchOrders = new Map(
-      selectedPlatforms.map((platform, waveIndex) => [
-        platform.id,
-        {
-          delay: getWaveDelaySeconds(baseIndex, waveIndex),
-          targetId: targetCityExposure.cityId,
-        },
-      ]),
+      selectedPlatforms.map((platform, waveIndex) => {
+        const plannedAssignment = enemyAssignmentsByResourceId.get(platform.id);
+        const assignedTargetId = plannedAssignment?.targetId;
+        const resolvedTargetId =
+          assignedTargetId && alliedPlatforms.some((candidate) => candidate.id === assignedTargetId)
+            ? assignedTargetId
+            : targetCityExposure?.cityId;
+        return [
+          platform.id,
+          {
+            delay: getWaveDelaySeconds(baseIndex, waveIndex),
+            targetId: resolvedTargetId,
+          },
+        ];
+      }),
     );
 
     updatedEnemyPlatforms = updatedEnemyPlatforms.map((platform) => {
       const launchOrder = launchOrders.get(platform.id);
       if (!launchOrder) {
+        return platform;
+      }
+
+      if (!launchOrder.targetId) {
         return platform;
       }
 
@@ -677,12 +762,21 @@ export function coordinateEnemyDeployments(
       nextLaunchTick:
         tick + getNextLaunchIntervalTicks(profile, baseIndex, selectedPlatforms.length),
       launchesIssued: baseState.launchesIssued + selectedPlatforms.length,
-      lastTargetCityId: targetCityExposure.cityId,
+      lastTargetCityId:
+        targetCityExposure?.cityId ??
+        enemyAssignmentsByResourceId.get(selectedPlatforms[0]?.id ?? "")?.targetId,
     };
+    const launchLead =
+      assignmentDrivenPlatforms.length > 0
+        ? "Shared decision engine launched"
+        : `${enemyBase.name ?? enemyBase.id} launched`;
     recentLaunches.unshift(
-      `${enemyBase.name ?? enemyBase.id} launched ${getWaveSummary(selectedPlatforms)} toward ` +
-        `${targetCityExposure.cityName}. ${getLaunchReason(targetCityExposure)} ` +
-        `${postureSnapshot.summary}`,
+      targetCityExposure
+        ? `${launchLead} ${getWaveSummary(selectedPlatforms)} toward ` +
+          `${targetCityExposure.cityName}. ${getLaunchReason(targetCityExposure)} ` +
+          `${postureSnapshot.summary}`
+        : `${launchLead} ${getWaveSummary(selectedPlatforms)} on planner-selected intercept tracks. ` +
+          `${postureSnapshot.summary}`,
     );
   }
 
@@ -695,6 +789,7 @@ export function coordinateEnemyDeployments(
     directorState: {
         baseStates: updatedBaseStates,
         postureMemory: posture.memory,
+        allocationPostureMemory: decisionAllocation.postureMemory,
         snapshot: {
           aggressionTier: profile.tier,
           aggressionLabel: profile.label,
