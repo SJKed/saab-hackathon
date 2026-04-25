@@ -31,8 +31,9 @@ import { getTargetCity } from "./targeting";
 export function createEnemyDeployments(
   enemyBases: EnemyBase[],
   cities: AlliedCity[],
+  alliedPlatformCount: number,
 ): MobilePlatform[] {
-  return createEnemyPlatforms(enemyBases, cities);
+  return createEnemyPlatforms(enemyBases, cities, alliedPlatformCount);
 }
 
 export function updateEnemyPositions(

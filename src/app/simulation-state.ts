@@ -140,7 +140,11 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
   const alliedSpawnZones = mapData.alliedSpawnZones.map(cloneStaticObjective);
   const enemyBases = mapData.enemyBases.map(cloneStaticObjective);
   const alliedPlatforms = mapData.alliedPlatforms.map(clonePlatform);
-  const enemyPlatforms = createEnemyDeployments(enemyBases, alliedCities);
+  const enemyPlatforms = createEnemyDeployments(
+    enemyBases,
+    alliedCities,
+    alliedPlatforms.length,
+  );
   const detectionState = calculateDetectionState({
     alliedCities,
     alliedSpawnZones,

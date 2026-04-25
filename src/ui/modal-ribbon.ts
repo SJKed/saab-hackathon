@@ -45,7 +45,7 @@ export function createModalRibbon(container: HTMLElement): ModalRibbonApi {
     position: "relative",
     flex: "1",
     minWidth: "0",
-    pointerEvents: "auto",
+    pointerEvents: "none",
   });
   dock.appendChild(workspace);
 
@@ -134,6 +134,7 @@ export function createModalRibbon(container: HTMLElement): ModalRibbonApi {
       ribbon.appendChild(button);
 
       const display = panel.style.display || "flex";
+      panel.style.pointerEvents = "auto";
       panelState.set(id, {
         panel,
         button,

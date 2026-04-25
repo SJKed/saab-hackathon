@@ -340,13 +340,20 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
   interceptDifficulty: 0.74,
 };
 
-const targetInventoryPerBase: PlatformInventory = {
+const alliedTargetInventoryPerBase: PlatformInventory = {
   fighterJet: 4,
   drone: 2,
   ballisticMissile: 4,
 };
 
-const inventoryVariance = 1;
+const enemyTargetInventoryPerBase: PlatformInventory = {
+  fighterJet: 5,
+  drone: 3,
+  ballisticMissile: 5,
+};
+
+const alliedInventoryVariance = 1;
+const enemyInventoryVariance = 1;
 const alliedPlatformTemplates: Record<PlatformClass, PlatformTemplate> = {
   fighterJet: alliedFighterTemplate,
   drone: alliedDroneTemplate,
@@ -423,16 +430,49 @@ function withOffset(
   };
 }
 
-function randomVariance(): number {
-  return Math.floor(Math.random() * ((inventoryVariance * 2) + 1)) - inventoryVariance;
+function randomVariance(variance: number): number {
+  return Math.floor(Math.random() * ((variance * 2) + 1)) - variance;
 }
 
-function rollInventoryForBase(): PlatformInventory {
+function rollInventoryForBase(
+  targetInventoryPerBase: PlatformInventory,
+  variance: number,
+): PlatformInventory {
   return {
-    fighterJet: targetInventoryPerBase.fighterJet + randomVariance(),
-    drone: targetInventoryPerBase.drone + randomVariance(),
-    ballisticMissile: targetInventoryPerBase.ballisticMissile + randomVariance(),
+    fighterJet: Math.max(0, targetInventoryPerBase.fighterJet + randomVariance(variance)),
+    drone: Math.max(0, targetInventoryPerBase.drone + randomVariance(variance)),
+    ballisticMissile: Math.max(0, targetInventoryPerBase.ballisticMissile + randomVariance(variance)),
   };
+}
+
+function getInventoryTotal(inventory: PlatformInventory): number {
+  return inventory.fighterJet + inventory.drone + inventory.ballisticMissile;
+}
+
+function getCombinedInventoryTotal(inventories: PlatformInventory[]): number {
+  return inventories.reduce((total, inventory) => total + getInventoryTotal(inventory), 0);
+}
+
+function enforceMinimumEnemyInventoryTotal(
+  inventories: PlatformInventory[],
+  minimumTotal: number,
+): PlatformInventory[] {
+  if (inventories.length === 0) {
+    return inventories;
+  }
+
+  const boostedInventories = inventories.map((inventory) => ({ ...inventory }));
+  const boostOrder: PlatformClass[] = ["drone", "fighterJet", "ballisticMissile"];
+  let nextBoostIndex = 0;
+
+  while (getCombinedInventoryTotal(boostedInventories) < minimumTotal) {
+    const inventoryIndex = nextBoostIndex % boostedInventories.length;
+    const platformClass = boostOrder[nextBoostIndex % boostOrder.length];
+    boostedInventories[inventoryIndex][platformClass] += 1;
+    nextBoostIndex += 1;
+  }
+
+  return boostedInventories;
 }
 
 function getSpawnPattern(
@@ -531,7 +571,7 @@ export function createAlliedPlatforms(
     createPlatformsForBase(
       spawnZone,
       spawnZoneIndex,
-      rollInventoryForBase(),
+      rollInventoryForBase(alliedTargetInventoryPerBase, alliedInventoryVariance),
       alliedPlatformTemplates,
       "allied",
       [],
@@ -542,16 +582,24 @@ export function createAlliedPlatforms(
 export function createEnemyPlatforms(
   enemyBases: EnemyBase[],
   alliedCities: AlliedCity[],
+  alliedPlatformCount: number,
 ): MobilePlatform[] {
   if (alliedCities.length === 0) {
     return [];
   }
 
+  const enemyInventories = enforceMinimumEnemyInventoryTotal(
+    enemyBases.map(() =>
+      rollInventoryForBase(enemyTargetInventoryPerBase, enemyInventoryVariance),
+    ),
+    alliedPlatformCount + 1,
+  );
+
   return enemyBases.flatMap((enemyBase, enemyBaseIndex) =>
     createPlatformsForBase(
       enemyBase,
       enemyBaseIndex,
-      rollInventoryForBase(),
+      enemyInventories[enemyBaseIndex],
       enemyPlatformTemplates,
       "enemy",
       alliedCities.map((city) => city.id),
