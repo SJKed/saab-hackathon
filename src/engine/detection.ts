@@ -12,7 +12,11 @@ import {
   isPlatformDeployed,
   platformCanSenseTarget,
 } from "../models/platform-utils";
-import { distanceKm, kmToRaw } from "../models/distance";
+import {
+  distanceWorld,
+  pixelToWorldDistance,
+  worldToPixelDistance,
+} from "../models/distance";
 import { getSensorEnvelope } from "./intercept";
 
 export type DetectionSourceKind = "fixed-radar" | "platform-sensor";
@@ -22,7 +26,7 @@ export type DetectionSource = {
   name: string;
   kind: DetectionSourceKind;
   position: Vector;
-  sensorRangeKm: number;
+  sensorRangeWorld: number;
 };
 
 export type LastKnownEnemyContact = {
@@ -43,7 +47,7 @@ export type DetectionState = {
 };
 
 const fixedRadarProfile: SensorProfile = {
-  sensorRange: 300,
+  sensorRange: pixelToWorldDistance(300),
   sensorType: "radar",
   trackingQuality: 0.78,
   targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
@@ -83,19 +87,19 @@ function getFixedRadarSources(
 ): DetectionSource[] {
   return [
     ...alliedCities.map((city) => ({
-      id: `fixed-radar:${city.id}`,
-      name: `${city.name ?? city.id} radar`,
-      kind: "fixed-radar" as const,
-      position: cloneVector(city.position),
-      sensorRangeKm: fixedRadarProfile.sensorRange,
-    })),
+        id: `fixed-radar:${city.id}`,
+        name: `${city.name ?? city.id} radar`,
+        kind: "fixed-radar" as const,
+        position: cloneVector(city.position),
+        sensorRangeWorld: fixedRadarProfile.sensorRange,
+      })),
     ...alliedSpawnZones.map((spawnZone) => ({
-      id: `fixed-radar:${spawnZone.id}`,
-      name: `${spawnZone.name ?? spawnZone.id} radar`,
-      kind: "fixed-radar" as const,
-      position: cloneVector(spawnZone.position),
-      sensorRangeKm: fixedRadarProfile.sensorRange,
-    })),
+        id: `fixed-radar:${spawnZone.id}`,
+        name: `${spawnZone.name ?? spawnZone.id} radar`,
+        kind: "fixed-radar" as const,
+        position: cloneVector(spawnZone.position),
+        sensorRangeWorld: fixedRadarProfile.sensorRange,
+      })),
   ];
 }
 
@@ -107,7 +111,7 @@ function getPlatformSensorSources(
     name: `${getPlatformDisplayName(platform)} ${platform.sensors.sensorType}`,
     kind: "platform-sensor",
     position: cloneVector(platform.position),
-    sensorRangeKm: platform.sensors.sensorRange,
+    sensorRangeWorld: platform.sensors.sensorRange,
   }));
 }
 
@@ -125,7 +129,7 @@ function detectWithFixedRadar(
   const fixedObjectives = [...alliedCities, ...alliedSpawnZones];
 
   for (const objective of fixedObjectives) {
-    if (distanceKm(objective.position, enemyPlatform.position) <= envelope) {
+    if (distanceWorld(objective.position, enemyPlatform.position) <= envelope) {
       return `${objective.name ?? objective.id} radar`;
     }
   }
@@ -148,7 +152,7 @@ function detectWithPlatformSensor(
     }
 
     if (
-      distanceKm(alliedPlatform.position, enemyPlatform.position) <=
+      distanceWorld(alliedPlatform.position, enemyPlatform.position) <=
       getSensorEnvelope(alliedPlatform, enemyPlatform)
     ) {
       return getPlatformDisplayName(alliedPlatform);
@@ -159,7 +163,7 @@ function detectWithPlatformSensor(
 }
 
 export function getDetectionSourceRadiusRaw(source: DetectionSource): number {
-  return kmToRaw(source.sensorRangeKm);
+  return worldToPixelDistance(source.sensorRangeWorld);
 }
 
 export function createDetectionState(): DetectionState {

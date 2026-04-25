@@ -5,7 +5,11 @@ import type {
   PlatformClass,
   Weapon,
 } from "../models/entity";
-import { distanceKm } from "../models/distance";
+import {
+  distanceWorld,
+  pixelRateToWorldRate,
+  pixelToWorldDistance,
+} from "../models/distance";
 import {
   isAlliedBaseDeploymentDisabled,
   type DebugSettings,
@@ -68,6 +72,10 @@ type OriginReserve = {
 
 const interceptFuelCommitmentBufferSeconds = 3;
 const reinforcementFuelCommitmentBufferSeconds = 6;
+const reinforcementDistancePenaltyScale = pixelToWorldDistance(70);
+const minimumTravelRate = pixelToWorldDistance(1);
+const interceptSensorScoreScale = pixelToWorldDistance(50);
+const reinforcementSensorScoreScale = pixelToWorldDistance(65);
 
 function isPlatformAvailable(
   platform: MobilePlatform,
@@ -452,7 +460,7 @@ function allocateHeuristicResources(
         priorityScore * 1.3 +
         platformEffectiveness *
           (alliedPlatform.oneWay ? 14 : 12) +
-        alliedPlatform.sensors.sensorRange / 50 -
+        alliedPlatform.sensors.sensorRange / interceptSensorScoreScale -
         intercept.timeToIntercept * 1.1 -
         reservePenalty -
         launchPressurePenalty;
@@ -565,9 +573,13 @@ function allocateHeuristicResources(
         continue;
       }
 
-      const distance = distanceKm(alliedPlatform.position, city.position);
+      const distance = distanceWorld(alliedPlatform.position, city.position);
       const travelTimeToCity =
-        distance / Math.max(1, getPlatformTransitSpeed(alliedPlatform));
+        distance /
+        Math.max(
+          minimumTravelRate,
+          pixelRateToWorldRate(getPlatformTransitSpeed(alliedPlatform)),
+        );
       if (
         getMissionFuelBudgetSeconds(alliedPlatform, alliedSpawnZones, []) <=
         travelTimeToCity + reinforcementFuelCommitmentBufferSeconds
@@ -602,12 +614,12 @@ function allocateHeuristicResources(
         continue;
       }
 
-      const score =
+        const score =
         unmetCoverage * 8.5 +
         localCoverage * 1.8 +
-        alliedPlatform.sensors.sensorRange / 65 +
+        alliedPlatform.sensors.sensorRange / reinforcementSensorScoreScale +
         alliedPlatform.enduranceSeconds / 45 -
-        distance / 70 +
+        distance / reinforcementDistancePenaltyScale +
         city.threat * 18 +
         (isPlatformStored(alliedPlatform) ? 0.2 : 1.1) -
         (reservePenalty * 1.15) -

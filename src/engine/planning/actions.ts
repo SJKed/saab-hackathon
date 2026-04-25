@@ -3,7 +3,10 @@ import type {
   AlliedSpawnZone,
   MobilePlatform,
 } from "../../models/entity";
-import { distanceKm } from "../../models/distance";
+import {
+  distanceWorld,
+  pixelToWorldDistance,
+} from "../../models/distance";
 import {
   isAlliedBaseDeploymentDisabled,
   type DebugSettings,
@@ -37,6 +40,7 @@ type CandidateGenerationResult = {
 };
 
 const plannerFuelCommitmentBufferSeconds = 3;
+const reinforceDistancePenaltyScale = pixelToWorldDistance(85);
 
 function isPlannerAvailable(
   platform: MobilePlatform,
@@ -177,7 +181,7 @@ export function generatePlannerCandidates(input: {
       .filter((platform) => platform.weapons.some((weapon) => weapon.ammunition > 0))
       .map((platform) => {
         const localCoverage = getAlliedCoverageScoreForCity(platform, city);
-        const distance = distanceKm(platform.position, city.position);
+        const distance = distanceWorld(platform.position, city.position);
         const expectedDamagePrevented =
           residualRisk * (0.45 + localCoverage * 0.22) + city.value * 0.8;
         const scarcityCost = getPlatformScarcityCost(platform, input.alliedPlatforms) * 0.75;
@@ -210,7 +214,7 @@ export function generatePlannerCandidates(input: {
           scorePlannerCandidate(candidate) +
           localCoverage * 1.6 +
           getCityPriorityBoost(city) * 0.12 -
-          distance / 85;
+          distance / reinforceDistancePenaltyScale;
         return candidate;
       })
       .sort((left, right) => right.baseScore - left.baseScore)

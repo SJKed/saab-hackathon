@@ -4,7 +4,7 @@ import type {
   MobilePlatform,
   PlatformClass,
 } from "../models/entity";
-import { distanceKm } from "../models/distance";
+import { distanceKm, pixelToWorldDistance } from "../models/distance";
 import {
   isEnemyBaseDeploymentDisabled,
   type DebugSettings,
@@ -42,6 +42,12 @@ type CityExposureBreakdown = {
   inboundPressure: number;
   activeThreatCount: number;
 };
+
+const deployedCoverageDistanceScale = pixelToWorldDistance(240);
+const reserveCoverageDistanceScale = pixelToWorldDistance(320);
+const inboundPressureDistanceScale = pixelToWorldDistance(260);
+const sensorRangeScoreScale = pixelToWorldDistance(250);
+const targetSelectionProximityScale = pixelToWorldDistance(980);
 
 type AggressionProfile = {
   tier: EnemyAggressionTier;
@@ -168,7 +174,7 @@ function getCoverageContribution(
   const platformStrength =
     getClassWeight(platform) *
     (0.5 +
-      platform.sensors.sensorRange / 250 +
+      platform.sensors.sensorRange / sensorRangeScoreScale +
       platform.combat.maxDurability / 210);
 
   return platformStrength * distanceFactor * weightMultiplier;
@@ -193,7 +199,7 @@ function getCityExposureBreakdown(
       deployedCoverage += getCoverageContribution(
         alliedPlatform,
         city,
-        240,
+        deployedCoverageDistanceScale,
         0.92,
       );
       continue;
@@ -203,7 +209,7 @@ function getCityExposureBreakdown(
       reserveCoverage += getCoverageContribution(
         alliedPlatform,
         city,
-        320,
+        reserveCoverageDistanceScale,
         0.42,
       );
     }
@@ -215,7 +221,8 @@ function getCityExposureBreakdown(
     }
 
     const proximityFactor =
-      1 / (1 + distanceKm(enemyPlatform.position, city.position) / 260);
+      1 /
+      (1 + distanceKm(enemyPlatform.position, city.position) / inboundPressureDistanceScale);
     const targetBias = enemyPlatform.targetId === city.id ? 1.25 : 0.55;
     const pressureWeight =
       enemyPlatform.threatLevel *
@@ -331,7 +338,8 @@ function selectTargetCity(
     const cityDistance = city
       ? distanceKm(base.position, city.position)
       : Number.POSITIVE_INFINITY;
-    const proximityBias = Math.max(0.22, 2 - cityDistance / 980);
+    const proximityBias =
+      Math.max(0.22, 2 - cityDistance / targetSelectionProximityScale);
     const continuityBonus =
       baseState.lastTargetCityId === cityExposure.cityId ? 0.18 : 0;
     const saturationPenalty = cityExposure.activeThreatCount * 0.35;

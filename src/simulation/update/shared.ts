@@ -10,7 +10,7 @@ import type {
   Vector,
 } from "../../models/entity";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../../models/platform-constants";
-import { kmToRaw } from "../../models/distance";
+import { kmToRaw, worldToPixelDistance } from "../../models/distance";
 import {
   getClosestRecoveryBase as findClosestRecoveryBase,
   hasReachedLatestSafeRecallMoment,
@@ -450,8 +450,12 @@ export function maneuverAgainstTarget(
     const payloadWeapon =
       getPrimaryPayloadWeapon(platform, targetType) ??
       getPrimaryPayloadWeapon(platform);
-    const blastRadius = payloadWeapon ? getWeaponBlastRadius(payloadWeapon) : 0;
-    const payloadRange = payloadWeapon?.maxRange ?? minimumDistanceToTarget;
+    const blastRadius = payloadWeapon
+      ? worldToPixelDistance(getWeaponBlastRadius(payloadWeapon))
+      : 0;
+    const payloadRange = payloadWeapon
+      ? worldToPixelDistance(payloadWeapon.maxRange)
+      : minimumDistanceToTarget;
     const terminalDistance = Math.max(
       oneWayTerminalHomingDistance,
       payloadRange + blastRadius * 1.4,
@@ -471,7 +475,7 @@ export function maneuverAgainstTarget(
       },
       inTerminalHomingWindow ? target.position : leadPrediction?.point ?? target.position,
       inTerminalHomingWindow ? 0 : Math.max(0, blastRadius * 0.18),
-      platform.maxSpeed,
+      getPlatformMaxSpeed(platform),
       deltaSeconds,
       bounds,
     );

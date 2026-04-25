@@ -10,7 +10,8 @@ import { createSimulationState, interpolateSimulationState } from "./simulation-
 import type { MapBounds } from "../data/loader";
 import type { ResourceAssignment } from "../engine/allocation";
 import { getMetricsSnapshot } from "../engine/metrics";
-import { distanceBetween, getPlatformDisplayName } from "../models/platform-utils";
+import { distanceWorld } from "../models/distance";
+import { getPlatformDisplayName } from "../models/platform-utils";
 import type { TrainingDeployRequest } from "../models/training";
 import type { StrategyMode } from "../ui/controls";
 import { createControls } from "../ui/controls";
@@ -130,7 +131,7 @@ export function startSimulation(shell: AppShell): void {
         targetName: getPlatformDisplayName(target),
         resourceId: platform.id,
         resourceName: getPlatformDisplayName(platform),
-        distance: distanceBetween(platform.position, target.position),
+        distance: distanceWorld(platform.position, target.position),
         threatScore: target.threatLevel,
         priorityScore: target.threatLevel * 10,
         reason:
@@ -149,7 +150,7 @@ export function startSimulation(shell: AppShell): void {
       targetName: city.name ?? city.id,
       resourceId: platform.id,
       resourceName: getPlatformDisplayName(platform),
-      distance: distanceBetween(platform.position, city.position),
+      distance: distanceWorld(platform.position, city.position),
       threatScore: city.threat,
       priorityScore: city.threat * 100,
       reason:

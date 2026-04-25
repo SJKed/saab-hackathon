@@ -5,6 +5,10 @@ import type {
   Vector,
 } from "./entity";
 import {
+  pixelToWorldDistance,
+  simulationTimeCompression,
+} from "./distance";
+import {
   distanceBetween,
   isPlatformDestroyed,
   isPlatformStored,
@@ -75,9 +79,15 @@ export function estimateRecoveryTravelTimeSeconds(
 
   const remainingDistance = Math.max(
     0,
-    distanceBetween(platform.position, closestBase.position) - recoveryArrivalDistance,
+    pixelToWorldDistance(
+      distanceBetween(platform.position, closestBase.position) -
+        recoveryArrivalDistance,
+    ),
   );
-  const returnSpeed = Math.max(1, platform.cruiseSpeed);
+  const returnSpeed = Math.max(
+    pixelToWorldDistance(1),
+    (platform.cruiseSpeed / 3600) * simulationTimeCompression,
+  );
 
   return remainingDistance / returnSpeed;
 }

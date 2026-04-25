@@ -4,6 +4,7 @@ import type {
   Vector,
   Weapon,
 } from "./entity";
+import { pixelToWorldDistance } from "./distance";
 
 const epsilon = 0.000001;
 
@@ -136,18 +137,21 @@ export function getPreferredCombatRange(
   if (platform.oneWay) {
     const payloadWeapon = getPrimaryPayloadWeapon(platform, targetType);
     if (!payloadWeapon) {
-      return 12;
+      return pixelToWorldDistance(12);
     }
 
     return Math.max(
-      12,
-      payloadWeapon.maxRange + getWeaponBlastRadius(payloadWeapon) * 0.35,
+      pixelToWorldDistance(12),
+      getWeaponBlastRadius(payloadWeapon),
+      payloadWeapon.maxRange,
     );
   }
 
   const usableWeapons = getWeaponsForTarget(platform, targetType);
   if (usableWeapons.length === 0) {
-    return platform.platformClass === "ballisticMissile" ? 12 : 32;
+    return platform.platformClass === "ballisticMissile"
+      ? pixelToWorldDistance(12)
+      : pixelToWorldDistance(32);
   }
 
   const preferredWeapon = usableWeapons.reduce((bestWeapon, weapon) =>
@@ -156,19 +160,35 @@ export function getPreferredCombatRange(
 
   switch (preferredWeapon.weaponClass) {
     case "airToAirMissile":
-      return Math.max(36, preferredWeapon.effectiveRange * 0.82);
+      return Math.max(
+        pixelToWorldDistance(36),
+        preferredWeapon.effectiveRange * 0.82,
+      );
     case "rapidFire":
-      return Math.max(18, preferredWeapon.effectiveRange * 0.58);
+      return Math.max(
+        pixelToWorldDistance(18),
+        preferredWeapon.effectiveRange * 0.58,
+      );
     case "bomb":
-      return Math.max(12, preferredWeapon.effectiveRange * 0.55);
+      return Math.max(
+        pixelToWorldDistance(12),
+        preferredWeapon.effectiveRange * 0.55,
+      );
     case "surfaceToAirMissile":
-      return Math.max(44, preferredWeapon.effectiveRange * 0.8);
+      return Math.max(
+        pixelToWorldDistance(44),
+        preferredWeapon.effectiveRange * 0.8,
+      );
     case "terminalPayload":
       return Math.max(
-        12,
-        preferredWeapon.maxRange + getWeaponBlastRadius(preferredWeapon) * 0.35,
+        pixelToWorldDistance(12),
+        getWeaponBlastRadius(preferredWeapon),
+        preferredWeapon.maxRange,
       );
     default:
-      return Math.max(20, preferredWeapon.effectiveRange * 0.7);
+      return Math.max(
+        pixelToWorldDistance(20),
+        preferredWeapon.effectiveRange * 0.7,
+      );
   }
 }

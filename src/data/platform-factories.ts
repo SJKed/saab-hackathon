@@ -10,6 +10,7 @@ import type {
   Weapon,
   WeaponClass,
 } from "../models/entity";
+import { pixelToWorldDistance } from "../models/distance";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
 
 type WeaponTemplate = Omit<Weapon, "id" | "cooldown" | "ammunition">;
@@ -32,6 +33,9 @@ type PlatformTemplate = {
 
 type PlatformInventory = Record<PlatformClass, number>;
 
+const scaleDistance = (distance: number): number =>
+  pixelToWorldDistance(distance);
+
 const rapidFireTemplate = (
   name: string,
   maxAmmunition: number,
@@ -46,9 +50,9 @@ const rapidFireTemplate = (
   damagePerHit,
   rateOfFire: 2.5,
   reloadTime: 0.8,
-  minRange: 0,
-  effectiveRange: maxRange * 0.72,
-  maxRange,
+  minRange: scaleDistance(0),
+  effectiveRange: scaleDistance(maxRange * 0.72),
+  maxRange: scaleDistance(maxRange),
   accuracy,
   guidanceType: "unguided",
   targetTypesSupported,
@@ -65,9 +69,9 @@ const airToAirMissileTemplate = (
   damagePerHit: 34,
   rateOfFire: 0.8,
   reloadTime: 2.8,
-  minRange: 28,
-  effectiveRange: 118,
-  maxRange: 142,
+  minRange: scaleDistance(28),
+  effectiveRange: scaleDistance(118),
+  maxRange: scaleDistance(142),
   accuracy: 0.84,
   guidanceType: "radar",
   targetTypesSupported,
@@ -87,13 +91,13 @@ const bombTemplate = (
   damagePerHit,
   rateOfFire: 0.45,
   reloadTime: 3.5,
-  minRange: 0,
-  effectiveRange: maxRange * 0.85,
-  maxRange,
+  minRange: scaleDistance(0),
+  effectiveRange: scaleDistance(maxRange * 0.85),
+  maxRange: scaleDistance(maxRange),
   accuracy: 0.78,
   guidanceType: "infrared",
   targetTypesSupported: ["city", "spawnZone", "base"],
-  blastRadius: 18,
+  blastRadius: scaleDistance(18),
   salvoSize: 1,
   probabilityOfKillBase: 0.8,
 });
@@ -111,13 +115,13 @@ const terminalPayloadTemplate = (
   damagePerHit,
   rateOfFire: 1,
   reloadTime: 9999,
-  minRange: 0,
-  effectiveRange: maxRange,
-  maxRange,
+  minRange: scaleDistance(0),
+  effectiveRange: scaleDistance(maxRange),
+  maxRange: scaleDistance(maxRange),
   accuracy: 1,
   guidanceType: "command",
   targetTypesSupported,
-  blastRadius,
+  blastRadius: scaleDistance(blastRadius),
   salvoSize: 1,
   probabilityOfKillBase: 1,
 });
@@ -138,7 +142,7 @@ const alliedFighterTemplate: PlatformTemplate = {
     armor: 0.2,
   },
   sensors: {
-    sensorRange: 220,
+    sensorRange: scaleDistance(220),
     sensorType: "radar",
     trackingQuality: 0.88,
     targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
@@ -173,7 +177,7 @@ const alliedDroneTemplate: PlatformTemplate = {
     armor: 0.08,
   },
   sensors: {
-    sensorRange: 172,
+    sensorRange: scaleDistance(172),
     sensorType: "infrared",
     trackingQuality: 0.72,
     targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
@@ -208,7 +212,7 @@ const alliedBallisticMissileTemplate: PlatformTemplate = {
     armor: 0.05,
   },
   sensors: {
-    sensorRange: 144,
+    sensorRange: scaleDistance(144),
     sensorType: "passive",
     trackingQuality: 0.66,
     targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
@@ -243,7 +247,7 @@ const enemyFighterTemplate: PlatformTemplate = {
     armor: 0.18,
   },
   sensors: {
-    sensorRange: 204,
+    sensorRange: scaleDistance(204),
     sensorType: "radar",
     trackingQuality: 0.81,
     targetTypesSupported: [
@@ -285,7 +289,7 @@ const enemyDroneTemplate: PlatformTemplate = {
     armor: 0.04,
   },
   sensors: {
-    sensorRange: 178,
+    sensorRange: scaleDistance(178),
     sensorType: "electroOptical",
     trackingQuality: 0.69,
     targetTypesSupported: [
@@ -327,7 +331,7 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
     armor: 0.06,
   },
   sensors: {
-    sensorRange: 136,
+    sensorRange: scaleDistance(136),
     sensorType: "passive",
     trackingQuality: 0.62,
     targetTypesSupported: ["city", "spawnZone", "base"],

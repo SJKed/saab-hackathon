@@ -4,7 +4,7 @@ import type {
   EnemyBase,
   MobilePlatform,
 } from "../models/entity";
-import { distanceKm } from "../models/distance";
+import { distanceWorld, pixelToWorldDistance } from "../models/distance";
 import {
   hasReachedLatestSafeRecallMoment,
 } from "../models/platform-recovery";
@@ -70,6 +70,9 @@ export type EnemyForcePostureSnapshot =
 
 const recallPersistenceSeconds = 5.5;
 const launchReleasePersistenceSeconds = 3.25;
+const enemyPressureDistanceScale = pixelToWorldDistance(255);
+const incursionDistanceThreshold = pixelToWorldDistance(260);
+const sensorCoverageScoreScale = pixelToWorldDistance(260);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -134,11 +137,14 @@ function getCoverageContribution(
   weightMultiplier: number,
 ): number {
   const distanceFactor =
-    1 / (1 + distanceKm(platform.position, city.position) / distanceScale);
+    1 /
+    (1 +
+      distanceWorld(platform.position, city.position) /
+        pixelToWorldDistance(distanceScale));
   const platformStrength =
     getPlatformClassWeight(platform) *
     (0.52 +
-      platform.sensors.sensorRange / 260 +
+      platform.sensors.sensorRange / sensorCoverageScoreScale +
       platform.combat.maxDurability / 220);
 
   return platformStrength * distanceFactor * weightMultiplier;
@@ -149,7 +155,10 @@ function getEnemyPressureContribution(
   city: AlliedCity,
 ): number {
   const proximityFactor =
-    1 / (1 + distanceKm(enemyPlatform.position, city.position) / 255);
+    1 /
+    (1 +
+      distanceWorld(enemyPlatform.position, city.position) /
+        enemyPressureDistanceScale);
   const targetBias = enemyPlatform.targetId === city.id ? 1.25 : 0.55;
   const pressureWeight =
     enemyPlatform.threatLevel *
@@ -192,11 +201,11 @@ function getIncursionCount(
     }
 
     const nearestCityDistance = cities.reduce((bestDistance, city) => {
-      const distance = distanceKm(enemyPlatform.position, city.position);
+      const distance = distanceWorld(enemyPlatform.position, city.position);
       return Math.min(bestDistance, distance);
     }, Number.POSITIVE_INFINITY);
 
-    if (enemyPlatform.targetId || nearestCityDistance <= 260) {
+    if (enemyPlatform.targetId || nearestCityDistance <= incursionDistanceThreshold) {
       incursionCount += 1;
     }
   }

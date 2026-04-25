@@ -1,7 +1,12 @@
 import type { AlliedCity, MobilePlatform } from "../../models/entity";
-import { distanceKm } from "../../models/distance";
-import { distanceBetween } from "../../models/platform-utils";
+import {
+  distanceWorld,
+  pixelRateToWorldRate,
+  pixelToWorldDistance,
+} from "../../models/distance";
 import type { EnemyIntentBelief } from "./types";
+
+const residualRiskDistanceScale = pixelToWorldDistance(260);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -11,12 +16,14 @@ function getTimeToCity(
   enemyPlatform: MobilePlatform,
   city: AlliedCity,
 ): number {
-  const speed = Math.hypot(enemyPlatform.velocity.x, enemyPlatform.velocity.y);
+  const speed = pixelRateToWorldRate(
+    Math.hypot(enemyPlatform.velocity.x, enemyPlatform.velocity.y),
+  );
   if (speed <= 0.001) {
     return Number.POSITIVE_INFINITY;
   }
 
-  return distanceBetween(enemyPlatform.position, city.position) / speed;
+  return distanceWorld(enemyPlatform.position, city.position) / speed;
 }
 
 export function estimateEnemyExpectedDamage(
@@ -56,7 +63,10 @@ export function estimateCityResidualRisk(
     const probability =
       belief?.cityProbabilities.find((entry) => entry.cityId === city.id)?.probability ?? 0;
     const distanceFactor =
-      1 / (1 + distanceKm(enemyPlatform.position, city.position) / 260);
+      1 /
+      (1 +
+        distanceWorld(enemyPlatform.position, city.position) /
+          residualRiskDistanceScale);
 
     return total + enemyPlatform.threatLevel * probability * (0.8 + distanceFactor * 1.2);
   }, city.threat * 50);

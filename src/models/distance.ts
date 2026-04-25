@@ -1,21 +1,42 @@
 import type { Vector } from "./entity";
 
-export const mapWidthKm = 1000;
-export const rawMapWidthUnits = 1666.7;
-export const simulationTimeCompression = 180;
-
-const rawUnitsPerKm = rawMapWidthUnits / mapWidthKm;
+export const SCALE = 200;
+export const simulationTimeCompression = 60000;
+const distanceDebugLogLimit = 20;
+let distanceDebugLogCount = 0;
 
 export function rawToKm(rawUnits: number): number {
-  return rawUnits / rawUnitsPerKm;
+  return pixelToWorldDistance(rawUnits);
 }
 
 export function kmToRaw(kilometers: number): number {
-  return kilometers * rawUnitsPerKm;
+  return worldToPixelDistance(kilometers);
 }
 
 export function distanceRaw(a: Vector, b: Vector): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+export function pixelToWorldDistance(distance: number): number {
+  const worldDistance = distance * SCALE;
+  if (distanceDebugLogCount < distanceDebugLogLimit) {
+    console.log("World distance:", worldDistance);
+    distanceDebugLogCount += 1;
+  }
+
+  return worldDistance;
+}
+
+export function worldToPixelDistance(distance: number): number {
+  return distance / SCALE;
+}
+
+export function distanceWorld(a: Vector, b: Vector): number {
+  return pixelToWorldDistance(distanceRaw(a, b));
+}
+
+export function pixelRateToWorldRate(rate: number): number {
+  return pixelToWorldDistance(rate);
 }
 
 export function distanceKm(a: Vector, b: Vector): number {
@@ -23,8 +44,8 @@ export function distanceKm(a: Vector, b: Vector): number {
 }
 
 export function kmPerHourToRawUnitsPerSecond(kilometersPerHour: number): number {
-  const compressedKilometersPerSecond =
+  const compressedWorldUnitsPerSecond =
     (kilometersPerHour / 3600) * simulationTimeCompression;
 
-  return kmToRaw(compressedKilometersPerSecond);
+  return worldToPixelDistance(compressedWorldUnitsPerSecond);
 }

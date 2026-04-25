@@ -15,7 +15,7 @@ function drawThreatHeatmap(
   cities: AlliedCity[],
 ): void {
   for (const city of cities) {
-    const intensity = Math.max(0, Math.min(1, city.threat * 35));
+    const intensity = Math.max(0, Math.min(1, city.threat * 110));
     if (intensity <= 0) {
       continue;
     }

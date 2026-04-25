@@ -3,7 +3,13 @@ import type {
   MobilePlatform,
   Vector,
 } from "../../models/entity";
-import { distanceKm, kmToRaw, rawToKm } from "../../models/distance";
+import {
+  distanceWorld,
+  kmToRaw,
+  pixelRateToWorldRate,
+  pixelToWorldDistance,
+  rawToKm,
+} from "../../models/distance";
 import {
   distanceBetween,
   getPlatformTargetType,
@@ -71,17 +77,18 @@ function getEnemyTimeToCity(
 
   const remainingDistance = Math.max(
     0,
-    distanceBetween(enemyPlatform.position, targetCity.position) -
-      minimumCityImpactDistance,
+    pixelToWorldDistance(
+      distanceBetween(enemyPlatform.position, targetCity.position) -
+        minimumCityImpactDistance,
+    ),
   );
 
   if (remainingDistance <= 0) {
     return 0;
   }
 
-  const enemySpeed = Math.hypot(
-    enemyPlatform.velocity.x,
-    enemyPlatform.velocity.y,
+  const enemySpeed = pixelRateToWorldRate(
+    Math.hypot(enemyPlatform.velocity.x, enemyPlatform.velocity.y),
   );
   if (enemySpeed <= epsilon) {
     return Number.POSITIVE_INFINITY;
@@ -148,12 +155,14 @@ export function predictLeadIntercept(
     maxLeadSeconds?: number;
   },
 ): LeadInterceptPrediction | undefined {
-  const alliedSpeed = options?.speedOverride ?? getPlatformTransitSpeed(alliedPlatform);
+  const alliedSpeedRaw =
+    options?.speedOverride ?? getPlatformTransitSpeed(alliedPlatform);
+  const alliedSpeed = pixelRateToWorldRate(alliedSpeedRaw);
   if (alliedSpeed <= epsilon) {
     return undefined;
   }
 
-  const directDistance = distanceBetween(
+  const directDistance = distanceWorld(
     alliedPlatform.position,
     enemyPlatform.position,
   );
@@ -164,7 +173,7 @@ export function predictLeadIntercept(
     options?.maxLeadSeconds ?? 1.6,
   );
   const rawInterceptTime =
-    solveInterceptTime(alliedPlatform, enemyPlatform, alliedSpeed) ??
+    solveInterceptTime(alliedPlatform, enemyPlatform, alliedSpeedRaw) ??
     Math.max(0, fallbackProjectionTime - maneuverDelay);
   const timeToIntercept = clamp(
     rawInterceptTime + maneuverDelay,
@@ -178,7 +187,7 @@ export function predictLeadIntercept(
 
   return {
     point,
-    distance: distanceKm(alliedPlatform.position, point),
+    distance: distanceWorld(alliedPlatform.position, point),
     timeToIntercept,
   };
 }
@@ -215,7 +224,7 @@ export function predictIntercept(
 
     return {
       point: fallbackPoint,
-      distance: rawToKm(fallbackDistance),
+      distance: pixelToWorldDistance(fallbackDistance),
       timeToIntercept: Number.POSITIVE_INFINITY,
       enemyTimeToCity,
       feasibleBeforeImpact: false,

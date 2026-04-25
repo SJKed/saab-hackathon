@@ -8,7 +8,7 @@ import type {
   Vector,
   Weapon,
 } from "../models/entity";
-import { distanceKm, kmToRaw } from "../models/distance";
+import { distanceKm, kmToRaw, pixelToWorldDistance } from "../models/distance";
 import type { DebugSettings } from "../models/debug";
 import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
@@ -18,6 +18,7 @@ import {
   getPlatformTargetType,
   getPreferredCombatRange,
   getUsableAmmoCost,
+  getWeaponBlastRadius,
   getWeaponPayloadDamage,
   getWeaponShotInterval,
   getWeaponsForTarget,
@@ -90,8 +91,9 @@ type FireResult = {
   destroyedEvent?: CombatLogEvent;
 };
 
-const minimumStrikeDistance = 3;
-const impactBuffer = 1.2;
+const minimumStrikeDistance = pixelToWorldDistance(3);
+const impactBuffer = pixelToWorldDistance(1.2);
+const cityStrikeEnvelopeBuffer = pixelToWorldDistance(28);
 const attackRunWindowSeconds = 0.75;
 const repositionWindowSeconds = 1.1;
 const evadeWindowSeconds = 0.8;
@@ -444,8 +446,19 @@ function getPlatformEngagementRange(
     return weaponRange;
   }
 
+  const payloadWeapon =
+    getPrimaryPayloadWeapon(attacker, targetType) ??
+    getPrimaryPayloadWeapon(attacker);
+  const terminalImpactRange = payloadWeapon
+    ? Math.max(
+        minimumStrikeDistance,
+        getWeaponBlastRadius(payloadWeapon) || payloadWeapon.maxRange,
+      )
+    : 0;
+
   return Math.max(
     weaponRange,
+    terminalImpactRange,
     minimumStrikeDistance,
   );
 }
@@ -704,7 +717,11 @@ function resolvePlatformFire(
   if (
     attacker.oneWay &&
     payloadWeapon &&
-    distance <= payloadWeapon.maxRange
+    distance <=
+      Math.max(
+        minimumStrikeDistance,
+        getWeaponBlastRadius(payloadWeapon) || payloadWeapon.maxRange,
+      )
   ) {
     const impactDamage =
       getWeaponPayloadDamage(payloadWeapon) *
@@ -1418,7 +1435,11 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
     if (
       enemyPlatform.platformClass === "ballisticMissile" &&
       payloadWeapon &&
-      distanceToCity <= payloadWeapon.maxRange
+      distanceToCity <=
+        Math.max(
+          minimumStrikeDistance,
+          getWeaponBlastRadius(payloadWeapon) || payloadWeapon.maxRange,
+        )
     ) {
       const impact = resolveMissileImpact(
         input.tick,
@@ -1432,7 +1453,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
-    if (distanceToCity > minimumStrikeDistance + 28) {
+    if (distanceToCity > minimumStrikeDistance + cityStrikeEnvelopeBuffer) {
       continue;
     }
 

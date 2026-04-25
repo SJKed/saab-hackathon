@@ -1,8 +1,12 @@
 import type { AlliedCity, MobilePlatform } from "../models/entity";
-import { distanceKm } from "../models/distance";
+import {
+  SCALE,
+  distanceWorld,
+  pixelToWorldDistance,
+} from "../models/distance";
 import { isPlatformDeployed } from "../models/platform-utils";
 
-const minimumDistance = 1;
+const minimumDistance = pixelToWorldDistance(1);
 
 export function calculateCityThreat(
   city: AlliedCity,
@@ -15,18 +19,21 @@ export function calculateCityThreat(
 
     const distance = Math.max(
       minimumDistance,
-      distanceKm(enemyPlatform.position, city.position),
+      distanceWorld(enemyPlatform.position, city.position),
     );
     const strikeWeight =
       enemyPlatform.platformClass === "ballisticMissile" ? 1.35 : 1;
 
-        return totalThreat + (enemyPlatform.threatLevel * strikeWeight) / distance;
-    }, 0);
+    return (
+      totalThreat +
+      ((enemyPlatform.threatLevel * strikeWeight) / distance) * SCALE
+    );
+  }, 0);
 }
 
 export function calculateThreatsForCities(cities: AlliedCity[], enemyPlatforms: MobilePlatform[]): AlliedCity[] {
-    return cities.map((city) => ({
-        ...city,
-        threat: calculateCityThreat(city, enemyPlatforms),
-    }));
+  return cities.map((city) => ({
+    ...city,
+    threat: calculateCityThreat(city, enemyPlatforms),
+  }));
 }
