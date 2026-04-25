@@ -8,6 +8,7 @@ import type {
   Vector,
   Weapon,
 } from "../models/entity";
+import type { DebugSettings } from "../models/debug";
 import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
   clonePlatform,
@@ -68,6 +69,7 @@ export type CombatResolutionInput = {
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
   tick: number;
+  debugSettings: DebugSettings;
 };
 
 export type CombatResolutionResult = {
@@ -493,6 +495,15 @@ function getPhaseDamageMultiplier(
   return multiplier;
 }
 
+function getTeamDamageMultiplier(
+  attacker: MobilePlatform,
+  debugSettings: DebugSettings,
+): number {
+  return attacker.team === "allied"
+    ? debugSettings.alliedDamageMultiplier
+    : debugSettings.enemyDamageMultiplier;
+}
+
 function getDeterministicRoll(seed: string): number {
   let hash = 2166136261;
 
@@ -510,6 +521,7 @@ function resolveShotOutcome(
   targetPlatform: MobilePlatform,
   weapon: Weapon,
   distance: number,
+  debugSettings: DebugSettings,
 ): { outcome: CombatOutcome; damage: number } {
   const hitChance = computeHitChance(attacker, targetPlatform, weapon, distance);
   const hitRoll = getDeterministicRoll(
@@ -541,6 +553,7 @@ function resolveShotOutcome(
     weapon.damagePerHit *
     (weapon.salvoSize ?? 1) *
     getPhaseDamageMultiplier(attacker, targetPlatform) *
+    getTeamDamageMultiplier(attacker, debugSettings) *
     damageMultiplier;
 
   return {
@@ -554,6 +567,7 @@ function resolveObjectiveShotOutcome(
   attacker: MobilePlatform,
   targetObjective: ObjectiveUnit,
   weapon: Weapon,
+  debugSettings: DebugSettings,
 ): { outcome: CombatOutcome; damage: number } {
   const hitChance = clamp(
     weapon.accuracy *
@@ -589,6 +603,7 @@ function resolveObjectiveShotOutcome(
     damage:
       weapon.damagePerHit *
       (weapon.salvoSize ?? 1) *
+      getTeamDamageMultiplier(attacker, debugSettings) *
       (outcome === "critical" ? 1.45 : 1),
   };
 }
@@ -648,6 +663,7 @@ function resolvePlatformFire(
   tick: number,
   attacker: MobilePlatform,
   targetPlatform: MobilePlatform,
+  debugSettings: DebugSettings,
 ): FireResult {
   const distance = distanceBetween(attacker.position, targetPlatform.position);
   const targetType = getPlatformTargetType(targetPlatform);
@@ -661,7 +677,10 @@ function resolvePlatformFire(
     payloadWeapon &&
     distance <= payloadWeapon.maxRange
   ) {
-    const impactDamage = getWeaponPayloadDamage(payloadWeapon) * 1.2;
+    const impactDamage =
+      getWeaponPayloadDamage(payloadWeapon) *
+      1.2 *
+      getTeamDamageMultiplier(attacker, debugSettings);
     const expendedAttacker = applyWeaponUse(attacker, payloadWeapon);
     const destroyedAttacker: MobilePlatform = {
       ...expendedAttacker,
@@ -736,6 +755,7 @@ function resolvePlatformFire(
     targetPlatform,
     weapon,
     distance,
+    debugSettings,
   );
   const updatedTargetPlatform =
     shot.damage > 0
@@ -801,6 +821,7 @@ function resolveObjectiveFire<T extends ObjectiveUnit>(
   attacker: MobilePlatform,
   targetObjective: T,
   targetType: TargetType,
+  debugSettings: DebugSettings,
 ): FireResult {
   const distance = distanceBetween(attacker.position, targetObjective.position);
   const weapon = selectWeapon(attacker, targetType, distance);
@@ -812,7 +833,13 @@ function resolveObjectiveFire<T extends ObjectiveUnit>(
   }
 
   const updatedAttacker = applyWeaponUse(attacker, weapon);
-  const shot = resolveObjectiveShotOutcome(tick, attacker, targetObjective, weapon);
+  const shot = resolveObjectiveShotOutcome(
+    tick,
+    attacker,
+    targetObjective,
+    weapon,
+    debugSettings,
+  );
   const updatedTargetObjective = applyDamageToObjective(targetObjective, shot.damage);
   const event = createExchangeEvent(
     tick,
@@ -850,10 +877,14 @@ function resolveMissileImpact(
   tick: number,
   missile: MobilePlatform,
   targetCity: AlliedCity,
+  debugSettings: DebugSettings,
 ): { missile: MobilePlatform; city: AlliedCity; events: CombatLogEvent[] } {
   const payloadWeapon =
     getPrimaryPayloadWeapon(missile, "city") ?? getPrimaryPayloadWeapon(missile);
-  const damage = payloadWeapon ? getWeaponPayloadDamage(payloadWeapon) : 0;
+  const damage = payloadWeapon
+    ? getWeaponPayloadDamage(payloadWeapon) *
+      getTeamDamageMultiplier(missile, debugSettings)
+    : 0;
   const city = applyDamageToObjective(targetCity, damage);
   const expendedMissile = payloadWeapon ? applyWeaponUse(missile, payloadWeapon) : missile;
   const destroyedMissile: MobilePlatform = {
@@ -1254,6 +1285,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
           input.tick,
           alliedPlatform,
           enemyPlatform,
+          input.debugSettings,
         );
         alliedPlatform = alliedFire.updatedAttacker;
         enemyPlatform = alliedFire.updatedTargetPlatform ?? enemyPlatform;
@@ -1274,6 +1306,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
           input.tick,
           enemyPlatform,
           alliedPlatform,
+          input.debugSettings,
         );
         enemyPlatform = enemyFire.updatedAttacker;
         alliedPlatform = enemyFire.updatedTargetPlatform ?? alliedPlatform;
@@ -1328,7 +1361,12 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       payloadWeapon &&
       distanceToCity <= payloadWeapon.maxRange
     ) {
-      const impact = resolveMissileImpact(input.tick, enemyPlatform, targetCity);
+      const impact = resolveMissileImpact(
+        input.tick,
+        enemyPlatform,
+        targetCity,
+        input.debugSettings,
+      );
       enemyPlatforms[enemyIndex] = impact.missile;
       alliedCities[cityIndex] = impact.city;
       events.push(...impact.events);
@@ -1344,6 +1382,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       enemyPlatform,
       targetCity,
       "city",
+      input.debugSettings,
     );
     enemyPlatforms[enemyIndex] = strike.updatedAttacker;
     if (strike.updatedTargetObjective) {

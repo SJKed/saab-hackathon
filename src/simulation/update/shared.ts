@@ -129,6 +129,7 @@ export function applyPassiveStateUpdates(
   alliedSpawnZones: AlliedSpawnZone[],
   enemyBases: EnemyBase[],
   deltaSeconds: number,
+  fuelBurnMultiplier: number,
 ): MobilePlatform {
   if (isPlatformDestroyed(platform)) {
     return {
@@ -162,7 +163,8 @@ export function applyPassiveStateUpdates(
     platform.status !== "destroyed";
   const enduranceSeconds = Math.max(
     0,
-    platform.enduranceSeconds - (isAirborne ? deltaSeconds : 0),
+    platform.enduranceSeconds -
+      (isAirborne ? deltaSeconds * Math.max(0, fuelBurnMultiplier) : 0),
   );
   if (isAirborne && enduranceSeconds <= 0) {
     return {

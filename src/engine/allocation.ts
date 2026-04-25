@@ -5,6 +5,10 @@ import type {
   PlatformClass,
   Weapon,
 } from "../models/entity";
+import {
+  isAlliedBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../models/debug";
 import { getMissionFuelBudgetSeconds } from "../models/platform-recovery";
 import {
   distanceBetween,
@@ -65,7 +69,10 @@ type OriginReserve = {
 const interceptFuelCommitmentBufferSeconds = 3;
 const reinforcementFuelCommitmentBufferSeconds = 6;
 
-function isPlatformAvailable(platform: MobilePlatform): boolean {
+function isPlatformAvailable(
+  platform: MobilePlatform,
+  debugSettings: DebugSettings,
+): boolean {
   if (platform.team !== "allied") {
     return false;
   }
@@ -78,6 +85,13 @@ function isPlatformAvailable(platform: MobilePlatform): boolean {
     platform.status === "returning" ||
     platform.status === "destroyed" ||
     platform.deploymentDelaySeconds > 0
+  ) {
+    return false;
+  }
+
+  if (
+    isPlatformStored(platform) &&
+    isAlliedBaseDeploymentDisabled(debugSettings, platform.originId)
   ) {
     return false;
   }
@@ -350,10 +364,11 @@ function selectBestWeapon(
 function canReinforce(
   alliedPlatform: MobilePlatform,
   alliedSpawnZones: AlliedSpawnZone[],
+  debugSettings: DebugSettings,
 ): boolean {
   return (
     !alliedPlatform.oneWay &&
-    isPlatformAvailable(alliedPlatform) &&
+    isPlatformAvailable(alliedPlatform, debugSettings) &&
     alliedPlatform.weapons.some((weapon) => hasAmmo(weapon)) &&
     getMissionFuelBudgetSeconds(alliedPlatform, alliedSpawnZones, []) >
       reinforcementFuelCommitmentBufferSeconds
@@ -366,6 +381,7 @@ function allocateHeuristicResources(
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
   postureSnapshot: AlliedForcePostureSnapshot,
+  debugSettings: DebugSettings,
 ): ResourceAssignment[] {
   const assignments: ResourceAssignment[] = [];
   const reservedPlatformIds = new Set<string>();
@@ -390,7 +406,7 @@ function allocateHeuristicResources(
     for (const alliedPlatform of alliedPlatforms) {
       if (
         reservedPlatformIds.has(alliedPlatform.id) ||
-        !isPlatformAvailable(alliedPlatform)
+        !isPlatformAvailable(alliedPlatform, debugSettings)
       ) {
         continue;
       }
@@ -544,7 +560,7 @@ function allocateHeuristicResources(
     for (const alliedPlatform of alliedPlatforms) {
       if (
         reservedPlatformIds.has(alliedPlatform.id) ||
-        !canReinforce(alliedPlatform, alliedSpawnZones)
+        !canReinforce(alliedPlatform, alliedSpawnZones, debugSettings)
       ) {
         continue;
       }
@@ -642,6 +658,7 @@ export function allocateResources(
   enemyPlatforms: MobilePlatform[],
   postureMemory: TeamPostureMemory,
   deltaSeconds: number,
+  debugSettings: DebugSettings,
 ): AllocationResult {
   const posture = applyPostureMemory(
     evaluateAlliedForcePosture(
@@ -664,6 +681,7 @@ export function allocateResources(
     alliedPlatforms,
     enemyPlatforms,
     postureSnapshot,
+    debugSettings,
   );
   const plannerInputs = generatePlannerCandidates({
     cities,
@@ -671,6 +689,7 @@ export function allocateResources(
     alliedPlatforms,
     enemyPlatforms,
     postureSnapshot,
+    debugSettings,
   });
   const plannedResult = runPortfolioPlanner({
     candidates: plannerInputs.candidates,

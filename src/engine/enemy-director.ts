@@ -4,6 +4,10 @@ import type {
   MobilePlatform,
   PlatformClass,
 } from "../models/entity";
+import {
+  isEnemyBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../models/debug";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
 import {
   clonePlatform,
@@ -77,48 +81,67 @@ const initialLaunchTick = 4;
 const baseLaunchStaggerTicks = 6;
 const maxRecentLaunches = 6;
 
+function getAggressionProfileForTier(
+  tier: EnemyAggressionTier,
+  enemyBaseCount: number,
+): AggressionProfile {
+  switch (tier) {
+    case "opening":
+      return {
+        tier: "opening",
+        label: "Opening Probe",
+        aggressionPercent: 26,
+        activeEnemyCap: enemyBaseCount + 1,
+        intervalTicks: 24,
+        maxWaveSize: 1,
+        missileQuota: 0,
+        classOrder: ["drone", "fighterJet", "ballisticMissile"],
+      };
+    case "pressure":
+      return {
+        tier: "pressure",
+        label: "Escalating Pressure",
+        aggressionPercent: 58,
+        activeEnemyCap: Math.max(enemyBaseCount + 2, enemyBaseCount * 2),
+        intervalTicks: 15,
+        maxWaveSize: 2,
+        missileQuota: 1,
+        classOrder: ["fighterJet", "drone", "ballisticMissile"],
+      };
+    case "surge":
+      return {
+        tier: "surge",
+        label: "Coordinated Surge",
+        aggressionPercent: 86,
+        activeEnemyCap: Math.max(enemyBaseCount + 4, enemyBaseCount * 3),
+        intervalTicks: 9,
+        maxWaveSize: 3,
+        missileQuota: 1,
+        classOrder: ["ballisticMissile", "fighterJet", "drone"],
+      };
+  }
+}
+
 function getAggressionProfile(
   tick: number,
   enemyBaseCount: number,
+  debugSettings: DebugSettings,
 ): AggressionProfile {
+  if (debugSettings.enemyAggressionOverride !== "auto") {
+    return getAggressionProfileForTier(
+      debugSettings.enemyAggressionOverride,
+      enemyBaseCount,
+    );
+  }
+
   const elapsedSeconds = tick / ticksPerSecond;
-
   if (elapsedSeconds < 28) {
-    return {
-      tier: "opening",
-      label: "Opening Probe",
-      aggressionPercent: 26,
-      activeEnemyCap: enemyBaseCount + 1,
-      intervalTicks: 24,
-      maxWaveSize: 1,
-      missileQuota: 0,
-      classOrder: ["drone", "fighterJet", "ballisticMissile"],
-    };
+    return getAggressionProfileForTier("opening", enemyBaseCount);
   }
-
   if (elapsedSeconds < 72) {
-    return {
-      tier: "pressure",
-      label: "Escalating Pressure",
-      aggressionPercent: 58,
-      activeEnemyCap: Math.max(enemyBaseCount + 2, enemyBaseCount * 2),
-      intervalTicks: 15,
-      maxWaveSize: 2,
-      missileQuota: 1,
-      classOrder: ["fighterJet", "drone", "ballisticMissile"],
-    };
+    return getAggressionProfileForTier("pressure", enemyBaseCount);
   }
-
-  return {
-    tier: "surge",
-    label: "Coordinated Surge",
-    aggressionPercent: 86,
-    activeEnemyCap: Math.max(enemyBaseCount + 4, enemyBaseCount * 3),
-    intervalTicks: 9,
-    maxWaveSize: 3,
-    missileQuota: 1,
-    classOrder: ["ballisticMissile", "fighterJet", "drone"],
-  };
+  return getAggressionProfileForTier("surge", enemyBaseCount);
 }
 
 function getClassWeight(platform: MobilePlatform): number {
@@ -497,8 +520,9 @@ export function coordinateEnemyDeployments(
   enemyPlatforms: MobilePlatform[],
   enemyBases: EnemyBase[],
   deltaSeconds: number,
+  debugSettings: DebugSettings,
 ): CoordinateEnemyDeploymentsResult {
-  const profile = getAggressionProfile(tick, enemyBases.length);
+  const profile = getAggressionProfile(tick, enemyBases.length, debugSettings);
   const cityExposureScores = getTopCityExposureScores(
     alliedCities,
     alliedPlatforms,
@@ -546,6 +570,11 @@ export function coordinateEnemyDeployments(
     }
 
     const baseState = getOrCreateBaseState(state, enemyBase.id, baseIndex);
+    if (isEnemyBaseDeploymentDisabled(debugSettings, enemyBase.id)) {
+      updatedBaseStates[enemyBase.id] = baseState;
+      continue;
+    }
+
     if (tick < baseState.nextLaunchTick) {
       updatedBaseStates[enemyBase.id] = baseState;
       continue;

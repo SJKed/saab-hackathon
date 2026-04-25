@@ -11,6 +11,7 @@ import type { MapBounds } from "../data/loader";
 import { getMetricsSnapshot } from "../engine/metrics";
 import type { StrategyMode } from "../ui/controls";
 import { createControls } from "../ui/controls";
+import { createDebugMenu } from "../ui/debug-menu";
 import { createInfoPanel } from "../ui/info-panel";
 import { createMetricsHud } from "../ui/metrics-hud";
 import { drawTerrain, drawTooltip, renderEntities } from "../ui/renderer";
@@ -55,6 +56,7 @@ function drawGrid(
 
 export function startSimulation(shell: AppShell): void {
   const controls = createControls(shell.appElement);
+  const debugMenu = createDebugMenu(shell.appElement);
   const metricsHud = createMetricsHud(shell.appElement);
   const infoPanel = createInfoPanel(shell.appElement);
 
@@ -165,6 +167,14 @@ export function startSimulation(shell: AppShell): void {
         state.assignments,
       ),
     );
+    debugMenu.update({
+      alliedSpawnZones: state.alliedSpawnZones,
+      enemyBases: state.enemyBases,
+      alliedPlatforms: state.alliedPlatforms,
+      enemyPlatforms: state.enemyPlatforms,
+      assignments: state.assignments,
+      directorSnapshot: state.enemyDirectorState.snapshot,
+    });
   }
 
   function renderLoop(timestamp: number): void {
@@ -198,6 +208,7 @@ export function startSimulation(shell: AppShell): void {
         (simulationTickMs / 1000) *
           getStrategySpeedFactor(controlsState.strategy),
         timestamp,
+        debugMenu.getState(),
       );
       tickAccumulatorMs -= simulationTickMs;
       stepsProcessed += 1;

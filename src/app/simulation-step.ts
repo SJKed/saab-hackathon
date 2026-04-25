@@ -8,6 +8,7 @@ import {
   updateResourcePositions,
 } from "../simulation/updater";
 import { mapCombatEventsToEffects } from "../ui/renderer";
+import type { DebugSettings } from "../models/debug";
 import type { SimulationState } from "./simulation-state";
 
 const maxEventLogEntries = 60;
@@ -16,6 +17,7 @@ export function advanceSimulation(
   state: SimulationState,
   deltaSeconds: number,
   effectCreatedAtMs: number,
+  debugSettings: DebugSettings,
 ): SimulationState {
   const nextTick = state.simulationTick + 1;
   const enemyDeploymentState = coordinateEnemyDeployments(
@@ -26,6 +28,7 @@ export function advanceSimulation(
     state.enemyPlatforms,
     state.enemyBases,
     deltaSeconds,
+    debugSettings,
   );
   let enemyPlatforms = updateEnemyPositions(
     enemyDeploymentState.enemyPlatforms,
@@ -34,6 +37,7 @@ export function advanceSimulation(
     state.enemyBases,
     deltaSeconds,
     state.mapData.bounds,
+    debugSettings,
   );
 
   const allocationResult = allocateResources(
@@ -43,6 +47,7 @@ export function advanceSimulation(
     enemyPlatforms,
     state.alliedPostureMemory,
     deltaSeconds,
+    debugSettings,
   );
   const metricsState = updateMetricsState(
     state.metricsState,
@@ -58,6 +63,7 @@ export function advanceSimulation(
     state.alliedSpawnZones,
     deltaSeconds,
     state.mapData.bounds,
+    debugSettings,
   );
 
   const combatResolution = resolveCombat({
@@ -67,6 +73,7 @@ export function advanceSimulation(
     alliedPlatforms,
     enemyPlatforms,
     tick: nextTick,
+    debugSettings,
   });
 
   alliedPlatforms = combatResolution.alliedPlatforms;

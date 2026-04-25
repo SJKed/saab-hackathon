@@ -3,6 +3,10 @@ import type {
   AlliedSpawnZone,
   MobilePlatform,
 } from "../../models/entity";
+import {
+  isAlliedBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../../models/debug";
 import { getMissionFuelBudgetSeconds } from "../../models/platform-recovery";
 import {
   distanceBetween,
@@ -37,6 +41,7 @@ const plannerFuelCommitmentBufferSeconds = 3;
 function isPlannerAvailable(
   platform: MobilePlatform,
   alliedSpawnZones: AlliedSpawnZone[],
+  debugSettings: DebugSettings,
 ): boolean {
   if (platform.team !== "allied") {
     return false;
@@ -50,6 +55,13 @@ function isPlannerAvailable(
     platform.status === "returning" ||
     platform.status === "destroyed" ||
     platform.deploymentDelaySeconds > 0
+  ) {
+    return false;
+  }
+
+  if (
+    isPlatformStored(platform) &&
+    isAlliedBaseDeploymentDisabled(debugSettings, platform.originId)
   ) {
     return false;
   }
@@ -81,11 +93,12 @@ export function generatePlannerCandidates(input: {
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
   postureSnapshot: AlliedForcePostureSnapshot;
+  debugSettings: DebugSettings;
 }): CandidateGenerationResult {
   const beliefs = buildEnemyIntentBeliefs(input.cities, input.enemyPlatforms);
   const candidates: PlannerActionCandidate[] = [];
   const availablePlatforms = input.alliedPlatforms.filter((platform) =>
-    isPlannerAvailable(platform, input.alliedSpawnZones),
+    isPlannerAvailable(platform, input.alliedSpawnZones, input.debugSettings),
   );
 
   for (const enemyPlatform of input.enemyPlatforms.filter(isPlatformDeployed)) {
