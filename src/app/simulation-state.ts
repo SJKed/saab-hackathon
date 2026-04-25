@@ -187,6 +187,8 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     enemyDirectorState: createEnemyDirectorState(enemyBases),
     metricsState: createMetricsState(
       alliedCities,
+      alliedSpawnZones,
+      enemyBases,
       enemyPlatforms,
       alliedPlatforms,
       0,

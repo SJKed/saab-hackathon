@@ -11,6 +11,7 @@ import type {
   WeaponClass,
 } from "../models/entity";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
+import { getPlatformAssetValueUsd } from "./asset-valuation";
 
 type WeaponTemplate = Omit<Weapon, "id" | "cooldown" | "ammunition">;
 
@@ -390,6 +391,7 @@ function createPlatform(
     name,
     team,
     platformClass: template.platformClass,
+    assetValueUsd: getPlatformAssetValueUsd(team, template.platformClass),
     role: template.role,
     position,
     velocity: { x: 0, y: 0 },

@@ -1,5 +1,6 @@
 import { getWeaponClassLabel } from "../../data/platform-factories";
 import { isPlatformDeployed, isPlatformStored } from "../../models/platform-utils";
+import { formatUsd } from "../formatters";
 import { hoverPointRadius } from "./constants";
 import { isPointInsidePolygon } from "./shared";
 import type { EntityRenderData } from "./types";
@@ -66,6 +67,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           "Type: Allied City",
           `ID: ${city.id}`,
           `Threat: ${city.threat.toFixed(4)}`,
+          `Asset Value: ${formatUsd(city.assetValueUsd)}`,
           `Integrity: ${city.health.toFixed(0)} / ${city.maxHealth.toFixed(0)}`,
           `Defense Rating: ${(city.defenseRating * 100).toFixed(0)}%`,
           `Position: (${Math.round(city.position.x)}, ${Math.round(city.position.y)})`,
@@ -95,6 +97,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
             spawnZone.id,
             "deployed",
           )}`,
+          `Asset Value: ${formatUsd(spawnZone.assetValueUsd)}`,
           `Integrity: ${spawnZone.health.toFixed(0)} / ${spawnZone.maxHealth.toFixed(0)}`,
           `Defense Rating: ${(spawnZone.defenseRating * 100).toFixed(0)}%`,
           `Position: (${Math.round(spawnZone.position.x)}, ${Math.round(spawnZone.position.y)})`,
@@ -133,6 +136,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Combat Phase: ${platform.combatPhase ?? "none"}`,
           `Origin: ${platform.originId ?? "Unknown"}`,
           `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)} km/h`,
+          `Asset Value: ${formatUsd(platform.assetValueUsd)}`,
           `Durability/Evasion/Signature: ${platform.combat.durability.toFixed(0)} / ${platform.combat.evasion.toFixed(2)} / ${platform.combat.signature.toFixed(2)}`,
           `Sensors: ${platform.sensors.sensorType} ${platform.sensors.sensorRange.toFixed(0)} km`,
           `Endurance: ${platform.enduranceSeconds.toFixed(0)} / ${platform.maxEnduranceSeconds.toFixed(0)} s`,
@@ -166,6 +170,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
             enemyBase.id,
             "deployed",
           )}`,
+          `Asset Value: ${formatUsd(enemyBase.assetValueUsd)}`,
           `Integrity: ${enemyBase.health.toFixed(0)} / ${enemyBase.maxHealth.toFixed(0)}`,
           `Defense Rating: ${(enemyBase.defenseRating * 100).toFixed(0)}%`,
           `Position: (${Math.round(enemyBase.position.x)}, ${Math.round(enemyBase.position.y)})`,
@@ -205,6 +210,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Target: ${platform.targetId ?? "Unassigned"}`,
           `Threat Level: ${platform.threatLevel.toFixed(2)}`,
           `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)} km/h`,
+          `Asset Value: ${formatUsd(platform.assetValueUsd)}`,
           `Durability/Evasion/Signature: ${platform.combat.durability.toFixed(0)} / ${platform.combat.evasion.toFixed(2)} / ${platform.combat.signature.toFixed(2)}`,
           `Weapons: ${formatWeaponSummary(platform)}`,
           platform.disengageReason

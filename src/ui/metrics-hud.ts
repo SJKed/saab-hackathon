@@ -1,4 +1,5 @@
 import type { MetricsSnapshot } from "../engine/metrics";
+import { formatUsd } from "./formatters";
 
 type HudApi = {
   update: (metrics: MetricsSnapshot) => void;
@@ -217,12 +218,16 @@ export function createMetricsHud(container: HTMLElement): HudApi {
   const cityIntegrity = createMetricCard("City Integrity");
   const enemyNeutralized = createMetricCard("Enemy Neutralized");
   const resourceEfficiency = createMetricCard("Efficiency");
+  const alliedLosses = createMetricCard("Allied Losses");
+  const enemyLosses = createMetricCard("Enemy Losses");
   const responseTime = createMetricCard("Avg Response");
   const cards = [
     cityProtection,
     cityIntegrity,
     enemyNeutralized,
     resourceEfficiency,
+    alliedLosses,
+    enemyLosses,
     responseTime,
   ];
 
@@ -249,6 +254,14 @@ export function createMetricsHud(container: HTMLElement): HudApi {
     resourceEfficiency.value.textContent = metrics.resourceEfficiencyLabel;
     resourceEfficiency.detail.textContent = `${metrics.resourceLossCount}/${metrics.totalResourceCount} resources lost`;
     applyTone(resourceEfficiency, getEfficiencyTone(metrics));
+
+    alliedLosses.value.textContent = formatUsd(metrics.lossValueBySide.allied, true);
+    alliedLosses.detail.textContent = "total allied assets lost";
+    applyTone(alliedLosses, dangerTone);
+
+    enemyLosses.value.textContent = formatUsd(metrics.lossValueBySide.enemy, true);
+    enemyLosses.detail.textContent = "total enemy assets lost";
+    applyTone(enemyLosses, warningTone);
 
     responseTime.value.textContent =
       metrics.averageResponseTicks === null

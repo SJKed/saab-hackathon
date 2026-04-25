@@ -1,14 +1,27 @@
 import type { ResourceAssignment } from "./allocation";
+import type { CombatLogEvent } from "./combat";
 import type { AlliedCity, MobilePlatform } from "../models/entity";
+import {
+  getCategoryDefaultLossValueUsd,
+  getLossBucketForCategory,
+} from "../data/asset-valuation";
 import { isPlatformDeployed } from "../models/platform-utils";
+
+type SideLosses = {
+  allied: number;
+  enemy: number;
+};
 
 export type MetricsState = {
   initialCityCount: number;
   initialCityHealth: number;
   initialEnemyCount: number;
   initialResourceCount: number;
+  assetValueById: Record<string, number>;
   enemyDeploymentTicks: Record<string, number>;
   firstInterceptResponseTicks: Record<string, number>;
+  lossValueBySide: SideLosses;
+  countedDestroyedEventIds: Record<string, true>;
 };
 
 export type MetricsSnapshot = {
@@ -21,6 +34,7 @@ export type MetricsSnapshot = {
   resourceLossCount: number;
   totalResourceCount: number;
   resourceEfficiencyLabel: string;
+  lossValueBySide: SideLosses;
   averageResponseTicks: number | null;
   activeInterceptCount: number;
   activeReinforcementCount: number;
@@ -48,17 +62,39 @@ function getAverage(values: number[]): number | null {
 
 export function createMetricsState(
   alliedCities: AlliedCity[],
+  alliedSpawnZones: { id: string; assetValueUsd: number }[],
+  enemyBases: { id: string; assetValueUsd: number }[],
   enemyPlatforms: MobilePlatform[],
   alliedPlatforms: MobilePlatform[],
   _tick: number,
 ): MetricsState {
+  const assetValueById: Record<string, number> = {};
+  for (const city of alliedCities) {
+    assetValueById[city.id] = city.assetValueUsd;
+  }
+  for (const spawnZone of alliedSpawnZones) {
+    assetValueById[spawnZone.id] = spawnZone.assetValueUsd;
+  }
+  for (const base of enemyBases) {
+    assetValueById[base.id] = base.assetValueUsd;
+  }
+  for (const platform of enemyPlatforms) {
+    assetValueById[platform.id] = platform.assetValueUsd;
+  }
+  for (const platform of alliedPlatforms) {
+    assetValueById[platform.id] = platform.assetValueUsd;
+  }
+
   return {
     initialCityCount: alliedCities.length,
     initialCityHealth: sumHealth(alliedCities),
     initialEnemyCount: enemyPlatforms.length,
     initialResourceCount: alliedPlatforms.length,
+    assetValueById,
     enemyDeploymentTicks: {},
     firstInterceptResponseTicks: {},
+    lossValueBySide: { allied: 0, enemy: 0 },
+    countedDestroyedEventIds: {},
   };
 }
 
@@ -66,10 +102,17 @@ export function updateMetricsState(
   state: MetricsState,
   enemyPlatforms: MobilePlatform[],
   assignments: ResourceAssignment[],
+  combatEvents: CombatLogEvent[],
   tick: number,
 ): MetricsState {
+  const assetValueById = { ...state.assetValueById };
+  for (const platform of enemyPlatforms) {
+    assetValueById[platform.id] = platform.assetValueUsd;
+  }
   const enemyDeploymentTicks = { ...state.enemyDeploymentTicks };
   const firstInterceptResponseTicks = { ...state.firstInterceptResponseTicks };
+  const countedDestroyedEventIds = { ...state.countedDestroyedEventIds };
+  const lossValueBySide = { ...state.lossValueBySide };
 
   for (const enemyPlatform of enemyPlatforms) {
     if (!isPlatformDeployed(enemyPlatform)) {
@@ -98,10 +141,32 @@ export function updateMetricsState(
     firstInterceptResponseTicks[assignment.targetId] = Math.max(0, tick - deploymentTick);
   }
 
+  // We consume only tick-local combat events, but still guard against replays/desyncs.
+  for (const event of combatEvents) {
+    if (
+      event.kind !== "destroyed" ||
+      !event.destroyedUnit ||
+      countedDestroyedEventIds[event.id]
+    ) {
+      continue;
+    }
+
+    const category = event.destroyedUnit.category;
+    const bucket = getLossBucketForCategory(category);
+    const value =
+      assetValueById[event.destroyedUnit.id] ??
+      getCategoryDefaultLossValueUsd(category);
+    lossValueBySide[bucket] += Math.max(0, value);
+    countedDestroyedEventIds[event.id] = true;
+  }
+
   return {
     ...state,
+    assetValueById,
     enemyDeploymentTicks,
     firstInterceptResponseTicks,
+    lossValueBySide,
+    countedDestroyedEventIds,
   };
 }
 
@@ -142,6 +207,7 @@ export function getMetricsSnapshot(
     resourceLossCount,
     totalResourceCount: state.initialResourceCount,
     resourceEfficiencyLabel: `${enemyNeutralizedCount} / ${resourceLossCount}`,
+    lossValueBySide: state.lossValueBySide,
     averageResponseTicks,
     activeInterceptCount,
     activeReinforcementCount,

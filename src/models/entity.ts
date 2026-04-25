@@ -36,6 +36,7 @@ export interface StaticObjective {
   id: string;
   name?: string;
   position: Vector;
+  assetValueUsd: number;
   maxHealth: number;
   health: number;
   defenseRating: number;
@@ -92,6 +93,7 @@ export interface MobilePlatform {
   name?: string;
   team: Team;
   platformClass: PlatformClass;
+  assetValueUsd: number;
   role: PlatformRole;
   position: Vector;
   velocity: Vector;

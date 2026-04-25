@@ -1,4 +1,5 @@
 import mapJson from "../../assets/map.json";
+import { getObjectiveAssetValueUsd } from "./asset-valuation";
 import { createAlliedPlatforms } from "./platform-factories";
 import type {
   AlliedCity,
@@ -211,6 +212,7 @@ function normalizeAlliedCity(
     id: city.id,
     name: city.name,
     position: normalizeVector(city),
+    assetValueUsd: getObjectiveAssetValueUsd("allied-city"),
     value: city.value,
     threat: 0,
     maxHealth: 260,
@@ -226,6 +228,7 @@ function normalizeAlliedSpawnZone(
     id: spawnZone.id,
     name: spawnZone.name,
     position: normalizeVector(spawnZone),
+    assetValueUsd: getObjectiveAssetValueUsd("allied-spawn-zone"),
     maxHealth: 210,
     health: 210,
     defenseRating: 0.16,
@@ -239,6 +242,7 @@ function normalizeEnemyBase(
     id: spawn.id,
     name: spawn.name,
     position: normalizeVector(spawn),
+    assetValueUsd: getObjectiveAssetValueUsd("enemy-base"),
     maxHealth: 240,
     health: 240,
     defenseRating: 0.18,

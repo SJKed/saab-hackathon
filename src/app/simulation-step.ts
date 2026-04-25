@@ -88,12 +88,6 @@ export function advanceSimulation(
     commandMode === "training"
       ? operatorAssignments
       : allocationResult.assignments;
-  const metricsState = updateMetricsState(
-    state.metricsState,
-    enemyPlatforms,
-    activeAssignments,
-    nextTick,
-  );
   let alliedPlatforms = updateResourcePositions(
     state.alliedPlatforms,
     activeAssignments,
@@ -126,6 +120,13 @@ export function advanceSimulation(
 
   alliedPlatforms = combatResolution.alliedPlatforms;
   enemyPlatforms = combatResolution.enemyPlatforms;
+  const metricsState = updateMetricsState(
+    state.metricsState,
+    enemyPlatforms,
+    activeAssignments,
+    combatResolution.events,
+    nextTick,
+  );
 
   const combatEffects =
     combatResolution.events.length > 0
