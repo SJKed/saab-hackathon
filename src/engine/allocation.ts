@@ -5,13 +5,13 @@ import type {
   PlatformClass,
   Weapon,
 } from "../models/entity";
+import { distanceKm } from "../models/distance";
 import {
   isAlliedBaseDeploymentDisabled,
   type DebugSettings,
 } from "../models/debug";
 import { getMissionFuelBudgetSeconds } from "../models/platform-recovery";
 import {
-  distanceBetween,
   getPlatformDisplayName,
   getPrimaryPayloadWeapon,
   getPlatformTargetType,
@@ -565,7 +565,7 @@ function allocateHeuristicResources(
         continue;
       }
 
-      const distance = distanceBetween(alliedPlatform.position, city.position);
+      const distance = distanceKm(alliedPlatform.position, city.position);
       const travelTimeToCity =
         distance / Math.max(1, getPlatformTransitSpeed(alliedPlatform));
       if (

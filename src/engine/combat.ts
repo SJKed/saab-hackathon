@@ -8,11 +8,11 @@ import type {
   Vector,
   Weapon,
 } from "../models/entity";
+import { distanceKm, kmToRaw } from "../models/distance";
 import type { DebugSettings } from "../models/debug";
 import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
   clonePlatform,
-  distanceBetween,
   getPlatformDisplayName,
   getPrimaryPayloadWeapon,
   getPlatformTargetType,
@@ -68,6 +68,7 @@ export type CombatResolutionInput = {
   enemyBases: EnemyBase[];
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
+  detectedEnemyIds?: string[];
   tick: number;
   debugSettings: DebugSettings;
 };
@@ -89,8 +90,8 @@ type FireResult = {
   destroyedEvent?: CombatLogEvent;
 };
 
-const minimumStrikeDistance = 10;
-const impactBuffer = 4;
+const minimumStrikeDistance = 3;
+const impactBuffer = 1.2;
 const attackRunWindowSeconds = 0.75;
 const repositionWindowSeconds = 1.1;
 const evadeWindowSeconds = 0.8;
@@ -185,8 +186,11 @@ function isEngagementDeadlocked(
   preferredRange: number,
   distance: number,
 ): boolean {
+  const distanceRaw = kmToRaw(distance);
+  const preferredRangeRaw = kmToRaw(preferredRange);
+
   return (
-    distance <= Math.max(deadlockDistanceThreshold, preferredRange * 0.9) &&
+    distanceRaw <= Math.max(deadlockDistanceThreshold, preferredRangeRaw * 0.9) &&
     getRelativeSpeed(platform, target) <= deadlockRelativeSpeedThreshold &&
     getPlatformSpeed(platform) <= deadlockRelativeSpeedThreshold &&
     getPlatformSpeed(target) <= deadlockRelativeSpeedThreshold
@@ -199,8 +203,11 @@ function isMergeOrOvershoot(
   preferredRange: number,
   distance: number,
 ): boolean {
+  const distanceRaw = kmToRaw(distance);
+  const preferredRangeRaw = kmToRaw(preferredRange);
+
   return (
-    distance <= Math.max(mergeDistanceThreshold, preferredRange * 0.72) &&
+    distanceRaw <= Math.max(mergeDistanceThreshold, preferredRangeRaw * 0.72) &&
     getClosureRate(platform, target) <= overshootClosureThreshold
   );
 }
@@ -419,6 +426,28 @@ function selectWeapon(
   }
 
   return selectedWeapon;
+}
+
+function getPlatformEngagementRange(
+  attacker: MobilePlatform,
+  targetType: TargetType,
+): number {
+  const weaponRange = attacker.weapons.reduce(
+    (maxRange, weapon) =>
+      weaponSupportsTarget(weapon, targetType)
+        ? Math.max(maxRange, weapon.maxRange)
+        : maxRange,
+    0,
+  );
+
+  if (!attacker.oneWay) {
+    return weaponRange;
+  }
+
+  return Math.max(
+    weaponRange,
+    minimumStrikeDistance,
+  );
 }
 
 function computeHitChance(
@@ -665,7 +694,7 @@ function resolvePlatformFire(
   targetPlatform: MobilePlatform,
   debugSettings: DebugSettings,
 ): FireResult {
-  const distance = distanceBetween(attacker.position, targetPlatform.position);
+  const distance = distanceKm(attacker.position, targetPlatform.position);
   const targetType = getPlatformTargetType(targetPlatform);
   const payloadWeapon = attacker.oneWay
     ? getPrimaryPayloadWeapon(attacker, targetType) ??
@@ -823,7 +852,7 @@ function resolveObjectiveFire<T extends ObjectiveUnit>(
   targetType: TargetType,
   debugSettings: DebugSettings,
 ): FireResult {
-  const distance = distanceBetween(attacker.position, targetObjective.position);
+  const distance = distanceKm(attacker.position, targetObjective.position);
   const weapon = selectWeapon(attacker, targetType, distance);
   if (!weapon) {
     return {
@@ -988,7 +1017,7 @@ function findClosestCity(
   let closestDistance = Number.POSITIVE_INFINITY;
 
   for (const city of cities) {
-    const distance = distanceBetween(enemyPlatform.position, city.position);
+    const distance = distanceKm(enemyPlatform.position, city.position);
     if (distance < closestDistance) {
       closestDistance = distance;
       closestCity = city;
@@ -1013,7 +1042,7 @@ function refreshEngagementPhase(
 ): MobilePlatform {
   const targetType = getPlatformTargetType(target);
   const preferredRange = getPreferredCombatRange(platform, targetType);
-  const distance = distanceBetween(platform.position, target.position);
+  const distance = distanceKm(platform.position, target.position);
   const pressing = isPressingPlatform(platform, target);
   const deadlocked = isEngagementDeadlocked(
     platform,
@@ -1157,9 +1186,41 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
   const enemyBases = input.enemyBases.map((base) => ({ ...base }));
   const alliedPlatforms = input.alliedPlatforms.map(clonePlatform);
   const enemyPlatforms = input.enemyPlatforms.map(clonePlatform);
+  const detectedEnemyIds = new Set(input.detectedEnemyIds ?? []);
   const events: CombatLogEvent[] = [];
 
   syncActiveEngagements(alliedPlatforms, enemyPlatforms);
+
+  for (let alliedIndex = 0; alliedIndex < alliedPlatforms.length; alliedIndex += 1) {
+    const alliedPlatform = alliedPlatforms[alliedIndex];
+    if (
+      alliedPlatform.engagedWithId &&
+      !detectedEnemyIds.has(alliedPlatform.engagedWithId)
+    ) {
+      alliedPlatforms[alliedIndex] = clearCombatState({
+        ...alliedPlatform,
+        status: alliedPlatform.status === "engaging" ? "transit" : alliedPlatform.status,
+        velocity:
+          alliedPlatform.status === "engaging"
+            ? { x: 0, y: 0 }
+            : alliedPlatform.velocity,
+      });
+    }
+  }
+
+  for (let enemyIndex = 0; enemyIndex < enemyPlatforms.length; enemyIndex += 1) {
+    const enemyPlatform = enemyPlatforms[enemyIndex];
+    if (enemyPlatform.engagedWithId && !detectedEnemyIds.has(enemyPlatform.id)) {
+      enemyPlatforms[enemyIndex] = clearCombatState({
+        ...enemyPlatform,
+        status: enemyPlatform.status === "engaging" ? "transit" : enemyPlatform.status,
+        velocity:
+          enemyPlatform.status === "engaging"
+            ? { x: 0, y: 0 }
+            : enemyPlatform.velocity,
+      });
+    }
+  }
 
   for (let alliedIndex = 0; alliedIndex < alliedPlatforms.length; alliedIndex += 1) {
     let alliedPlatform = alliedPlatforms[alliedIndex];
@@ -1170,6 +1231,10 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
     for (let enemyIndex = 0; enemyIndex < enemyPlatforms.length; enemyIndex += 1) {
       let enemyPlatform = enemyPlatforms[enemyIndex];
       if (isPlatformDestroyed(enemyPlatform) || isPlatformStored(enemyPlatform)) {
+        continue;
+      }
+
+      if (!detectedEnemyIds.has(enemyPlatform.id)) {
         continue;
       }
 
@@ -1187,21 +1252,15 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
         continue;
       }
 
-      const distance = distanceBetween(alliedPlatform.position, enemyPlatform.position);
+      const distance = distanceKm(alliedPlatform.position, enemyPlatform.position);
       const possibleRange = Math.max(
-        alliedPlatform.weapons.reduce(
-          (maxRange, weapon) =>
-            weaponSupportsTarget(weapon, getPlatformTargetType(enemyPlatform))
-              ? Math.max(maxRange, weapon.maxRange)
-              : maxRange,
-          0,
+        getPlatformEngagementRange(
+          alliedPlatform,
+          getPlatformTargetType(enemyPlatform),
         ),
-        enemyPlatform.weapons.reduce(
-          (maxRange, weapon) =>
-            weaponSupportsTarget(weapon, getPlatformTargetType(alliedPlatform))
-              ? Math.max(maxRange, weapon.maxRange)
-              : maxRange,
-          0,
+        getPlatformEngagementRange(
+          enemyPlatform,
+          getPlatformTargetType(alliedPlatform),
         ),
       );
 
@@ -1350,7 +1409,7 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
       continue;
     }
 
-    const distanceToCity = distanceBetween(enemyPlatform.position, targetCity.position);
+    const distanceToCity = distanceKm(enemyPlatform.position, targetCity.position);
     const payloadWeapon =
       enemyPlatform.oneWay
         ? getPrimaryPayloadWeapon(enemyPlatform, "city") ??

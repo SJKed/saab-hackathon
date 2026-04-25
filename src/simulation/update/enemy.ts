@@ -1,6 +1,9 @@
 import { createEnemyPlatforms } from "../../data/platform-factories";
 import type { MapBounds } from "../../data/loader";
-import { getPlatformTransitSpeed } from "../../engine/intercept";
+import {
+  getPlatformMaxSpeed,
+  getPlatformTransitSpeed,
+} from "../../engine/intercept";
 import type {
   AlliedCity,
   EnemyBase,
@@ -90,7 +93,7 @@ export function updateEnemyPositions(
         },
         targetCity.position,
         minimumDistanceToTarget,
-        platform.oneWay ? platform.maxSpeed : getPlatformTransitSpeed(platform),
+        platform.oneWay ? getPlatformMaxSpeed(platform) : getPlatformTransitSpeed(platform),
         deltaSeconds,
         bounds,
       );
@@ -130,7 +133,7 @@ export function updateEnemyPositions(
       { ...platform, status: "transit", targetId: targetCity.id },
       targetCity.position,
       minimumDistanceToTarget,
-      platform.oneWay ? platform.maxSpeed : getPlatformTransitSpeed(platform),
+      platform.oneWay ? getPlatformMaxSpeed(platform) : getPlatformTransitSpeed(platform),
       deltaSeconds,
       bounds,
     );

@@ -245,6 +245,8 @@ export function startSimulation(shell: AppShell): void {
       enemyBases: renderState.enemyBases,
       enemyPlatforms: renderState.enemyPlatforms,
       alliedPlatforms: renderState.alliedPlatforms,
+      detectionState: renderState.detectionState,
+      showHiddenEnemies: controls.getState().showHiddenEnemies,
       assignments: renderState.assignments,
       combatEffects: renderState.combatEffects,
       terrain: state.mapData.terrain,

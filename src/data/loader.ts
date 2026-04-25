@@ -197,34 +197,20 @@ export function validateMapData(value: unknown): value is RawMapData {
   return true;
 }
 
-function normalizeCoordinate(rawValue: number, rawMax: number, canvasMax: number): number {
-  if (rawMax <= 0 || canvasMax <= 0) {
-    throw new Error("Normalization bounds must be greater than zero.");
-  }
-
-  return (rawValue / rawMax) * canvasMax;
-}
-
-export function normalizeVector(
-  raw: { x: number; y: number },
-  sourceSize: CanvasSize,
-  canvasSize: CanvasSize,
-): Vector {
+export function normalizeVector(raw: { x: number; y: number }): Vector {
   return {
-    x: normalizeCoordinate(raw.x, sourceSize.width, canvasSize.width),
-    y: normalizeCoordinate(raw.y, sourceSize.height, canvasSize.height),
+    x: raw.x,
+    y: raw.y,
   };
 }
 
 function normalizeAlliedCity(
   city: RawAlliedCity,
-  sourceSize: CanvasSize,
-  canvasSize: CanvasSize,
 ): AlliedCity {
   return {
     id: city.id,
     name: city.name,
-    position: normalizeVector(city, sourceSize, canvasSize),
+    position: normalizeVector(city),
     value: city.value,
     threat: 0,
     maxHealth: 260,
@@ -235,13 +221,11 @@ function normalizeAlliedCity(
 
 function normalizeAlliedSpawnZone(
   spawnZone: RawPoint,
-  sourceSize: CanvasSize,
-  canvasSize: CanvasSize,
 ): AlliedSpawnZone {
   return {
     id: spawnZone.id,
     name: spawnZone.name,
-    position: normalizeVector(spawnZone, sourceSize, canvasSize),
+    position: normalizeVector(spawnZone),
     maxHealth: 210,
     health: 210,
     defenseRating: 0.16,
@@ -250,13 +234,11 @@ function normalizeAlliedSpawnZone(
 
 function normalizeEnemyBase(
   spawn: RawPoint,
-  sourceSize: CanvasSize,
-  canvasSize: CanvasSize,
 ): EnemyBase {
   return {
     id: spawn.id,
     name: spawn.name,
-    position: normalizeVector(spawn, sourceSize, canvasSize),
+    position: normalizeVector(spawn),
     maxHealth: 240,
     health: 240,
     defenseRating: 0.18,
@@ -265,21 +247,17 @@ function normalizeEnemyBase(
 
 function normalizeTerrainZone(
   zone: RawTerrainZone,
-  sourceSize: CanvasSize,
-  canvasSize: CanvasSize,
 ): NormalizedTerrainZone {
   return {
     id: zone.id,
     name: zone.name,
     side: zone.side,
     subtype: zone.subtype,
-    points: zone.points.map(([x, y]) =>
-      normalizeVector({ x, y }, sourceSize, canvasSize),
-    ),
+    points: zone.points.map(([x, y]) => normalizeVector({ x, y })),
   };
 }
 
-export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
+export function loadMapData(_canvasSize: CanvasSize): NormalizedMapData {
   if (!validateMapData(mapJson)) {
     throw new Error("Invalid map.json structure.");
   }
@@ -291,10 +269,10 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
   };
 
   const alliedCities = validatedMap.alliedCities.map((city) =>
-    normalizeAlliedCity(city, sourceSize, canvasSize),
+    normalizeAlliedCity(city),
   );
   const alliedSpawnZones = validatedMap.alliedSpawnZones.map((spawnZone) =>
-    normalizeAlliedSpawnZone(spawnZone, sourceSize, canvasSize),
+    normalizeAlliedSpawnZone(spawnZone),
   );
 
   return {
@@ -302,21 +280,21 @@ export function loadMapData(canvasSize: CanvasSize): NormalizedMapData {
     alliedSpawnZones,
     alliedPlatforms: createAlliedPlatforms(alliedSpawnZones),
     enemyBases: validatedMap.enemySpawnZones.map((spawn) =>
-      normalizeEnemyBase(spawn, sourceSize, canvasSize),
+      normalizeEnemyBase(spawn),
     ),
     terrain: {
       waterZones: validatedMap.terrain.waterZones.map((zone) =>
-        normalizeTerrainZone(zone, sourceSize, canvasSize),
+        normalizeTerrainZone(zone),
       ),
       landZones: validatedMap.terrain.landZones.map((zone) =>
-        normalizeTerrainZone(zone, sourceSize, canvasSize),
+        normalizeTerrainZone(zone),
       ),
     },
     bounds: {
       minX: 0,
-      maxX: canvasSize.width,
+      maxX: sourceSize.width,
       minY: 0,
-      maxY: canvasSize.height,
+      maxY: sourceSize.height,
     },
   };
 }

@@ -4,11 +4,11 @@ import type {
   EnemyBase,
   MobilePlatform,
 } from "../models/entity";
+import { distanceKm } from "../models/distance";
 import {
   hasReachedLatestSafeRecallMoment,
 } from "../models/platform-recovery";
 import {
-  distanceBetween,
   hasUsablePayload,
   isPlatformDeployed,
   isPlatformDestroyed,
@@ -134,7 +134,7 @@ function getCoverageContribution(
   weightMultiplier: number,
 ): number {
   const distanceFactor =
-    1 / (1 + distanceBetween(platform.position, city.position) / distanceScale);
+    1 / (1 + distanceKm(platform.position, city.position) / distanceScale);
   const platformStrength =
     getPlatformClassWeight(platform) *
     (0.52 +
@@ -149,7 +149,7 @@ function getEnemyPressureContribution(
   city: AlliedCity,
 ): number {
   const proximityFactor =
-    1 / (1 + distanceBetween(enemyPlatform.position, city.position) / 255);
+    1 / (1 + distanceKm(enemyPlatform.position, city.position) / 255);
   const targetBias = enemyPlatform.targetId === city.id ? 1.25 : 0.55;
   const pressureWeight =
     enemyPlatform.threatLevel *
@@ -192,7 +192,7 @@ function getIncursionCount(
     }
 
     const nearestCityDistance = cities.reduce((bestDistance, city) => {
-      const distance = distanceBetween(enemyPlatform.position, city.position);
+      const distance = distanceKm(enemyPlatform.position, city.position);
       return Math.min(bestDistance, distance);
     }, Number.POSITIVE_INFINITY);
 

@@ -1,4 +1,5 @@
 import type { AlliedCity, MobilePlatform } from "../../models/entity";
+import { getDetectionSourceRadiusRaw } from "../../engine/detection";
 import { isPlatformDeployed } from "../../models/platform-utils";
 import { getAssignmentTarget } from "../../simulation/update/targeting";
 import {
@@ -14,7 +15,7 @@ function drawThreatHeatmap(
   cities: AlliedCity[],
 ): void {
   for (const city of cities) {
-    const intensity = Math.max(0, Math.min(1, city.threat * 110));
+    const intensity = Math.max(0, Math.min(1, city.threat * 35));
     if (intensity <= 0) {
       continue;
     }
@@ -37,6 +38,38 @@ function drawThreatHeatmap(
     ctx.arc(city.position.x, city.position.y, radius, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+function drawSensorCoverage(
+  ctx: CanvasRenderingContext2D,
+  data: EntityRenderData,
+): void {
+  ctx.save();
+  ctx.setLineDash([2, 7]);
+  ctx.lineWidth = 1;
+
+  for (const source of data.detectionState.detectionSources) {
+    ctx.strokeStyle =
+      source.kind === "fixed-radar"
+        ? "rgba(76, 201, 240, 0.18)"
+        : "rgba(255, 209, 102, 0.24)";
+    ctx.fillStyle =
+      source.kind === "fixed-radar"
+        ? "rgba(76, 201, 240, 0.025)"
+        : "rgba(255, 209, 102, 0.035)";
+    ctx.beginPath();
+    ctx.arc(
+      source.position.x,
+      source.position.y,
+      getDetectionSourceRadiusRaw(source),
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 function drawAssignments(
@@ -137,6 +170,7 @@ export function drawOperationalOverlays(
   data: EntityRenderData,
 ): void {
   drawThreatHeatmap(ctx, data.alliedCities);
+  drawSensorCoverage(ctx, data);
   drawDeployments(
     ctx,
     data.alliedPlatforms,
@@ -158,5 +192,8 @@ export function drawOperationalOverlays(
       data.enemyBases.find((base) => base.id === platform.originId)?.position,
     enemyDeploymentLineColor,
     [4, 6],
+    (platform) =>
+      !data.showHiddenEnemies &&
+      !data.detectionState.detectedEnemyIds.includes(platform.id),
   );
 }

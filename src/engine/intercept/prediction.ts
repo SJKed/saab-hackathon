@@ -3,6 +3,7 @@ import type {
   MobilePlatform,
   Vector,
 } from "../../models/entity";
+import { distanceKm, kmToRaw, rawToKm } from "../../models/distance";
 import {
   distanceBetween,
   getPlatformTargetType,
@@ -26,7 +27,7 @@ export type LeadInterceptPrediction = {
   timeToIntercept: number;
 };
 
-const minimumCityImpactDistance = 8;
+const minimumCityImpactDistance = kmToRaw(2.4);
 const interceptLeadBufferSeconds = 0.45;
 const epsilon = 0.000001;
 
@@ -90,7 +91,7 @@ function getEnemyTimeToCity(
 }
 
 function getManeuverDelaySeconds(platform: MobilePlatform): number {
-  const accelerationPenalty = Math.max(0, 70 - platform.acceleration) / 85;
+  const accelerationPenalty = Math.max(0, 420 - platform.acceleration) / 520;
 
   return 0.18 + accelerationPenalty;
 }
@@ -177,7 +178,7 @@ export function predictLeadIntercept(
 
   return {
     point,
-    distance: distanceBetween(alliedPlatform.position, point),
+    distance: distanceKm(alliedPlatform.position, point),
     timeToIntercept,
   };
 }
@@ -187,15 +188,16 @@ export function predictIntercept(
   enemyPlatform: MobilePlatform,
   cities: AlliedCity[],
 ): InterceptPrediction | undefined {
-  const directDistance = distanceBetween(
+  const directDistanceRaw = distanceBetween(
     alliedPlatform.position,
     enemyPlatform.position,
   );
+  const directDistanceKm = rawToKm(directDistanceRaw);
   const enemyTimeToCity = getEnemyTimeToCity(enemyPlatform, cities);
   const targetType = getPlatformTargetType(enemyPlatform);
   const acquisitionFeasible =
     platformCanSenseTarget(alliedPlatform, targetType) &&
-    directDistance <= getSensorEnvelope(alliedPlatform, enemyPlatform) * 1.18;
+    directDistanceKm <= getSensorEnvelope(alliedPlatform, enemyPlatform) * 1.18;
   const leadPrediction = predictLeadIntercept(alliedPlatform, enemyPlatform);
 
   if (!leadPrediction) {
@@ -213,7 +215,7 @@ export function predictIntercept(
 
     return {
       point: fallbackPoint,
-      distance: fallbackDistance,
+      distance: rawToKm(fallbackDistance),
       timeToIntercept: Number.POSITIVE_INFINITY,
       enemyTimeToCity,
       feasibleBeforeImpact: false,
@@ -227,7 +229,7 @@ export function predictIntercept(
 
   return {
     point: leadPrediction.point,
-    distance: directDistance > epsilon ? leadPrediction.distance : 0,
+    distance: directDistanceRaw > epsilon ? leadPrediction.distance : 0,
     timeToIntercept: leadPrediction.timeToIntercept,
     enemyTimeToCity,
     feasibleBeforeImpact:

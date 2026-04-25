@@ -1,5 +1,6 @@
 import type { AlliedCity, MobilePlatform } from "../../models/entity";
-import { distanceBetween, isPlatformDeployed } from "../../models/platform-utils";
+import { distanceKm } from "../../models/distance";
+import { isPlatformDeployed } from "../../models/platform-utils";
 import type { EnemyIntentBelief } from "./types";
 
 function clamp(value: number, min: number, max: number): number {
@@ -38,7 +39,7 @@ export function buildEnemyIntentBeliefs(
     .map((platform) => {
       const rawScores = cities.map((city) => {
         const distanceFactor =
-          1 / (1 + distanceBetween(platform.position, city.position) / 280);
+          1 / (1 + distanceKm(platform.position, city.position) / 280);
         const headingFactor = 0.35 + getHeadingAlignment(platform, city);
         const valueFactor = 0.8 + city.value * 0.08;
         const targetBias = platform.targetId === city.id ? 2.4 : 1;

@@ -132,10 +132,10 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           }`,
           `Combat Phase: ${platform.combatPhase ?? "none"}`,
           `Origin: ${platform.originId ?? "Unknown"}`,
-          `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)}`,
+          `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)} km/h`,
           `Durability/Evasion/Signature: ${platform.combat.durability.toFixed(0)} / ${platform.combat.evasion.toFixed(2)} / ${platform.combat.signature.toFixed(2)}`,
-          `Sensors: ${platform.sensors.sensorType} ${platform.sensors.sensorRange.toFixed(0)}m`,
-          `Fuel: ${platform.enduranceSeconds.toFixed(0)} / ${platform.maxEnduranceSeconds.toFixed(0)} s`,
+          `Sensors: ${platform.sensors.sensorType} ${platform.sensors.sensorRange.toFixed(0)} km`,
+          `Endurance: ${platform.enduranceSeconds.toFixed(0)} / ${platform.maxEnduranceSeconds.toFixed(0)} s`,
           `Weapons: ${formatWeaponSummary(platform)}`,
           platform.disengageReason
             ? `Breakaway: ${platform.disengageReason}`
@@ -179,6 +179,11 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
       continue;
     }
 
+    const isDetected = data.detectionState.detectedEnemyIds.includes(platform.id);
+    if (!isDetected && !data.showHiddenEnemies) {
+      continue;
+    }
+
     if (
       Math.hypot(platform.position.x - x, platform.position.y - y) <=
       hoverRadius
@@ -193,12 +198,13 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
         title: platform.name ?? platform.id,
         lines: [
           `Type: Enemy ${platform.platformClass} (${platform.role})`,
+          `Detection: ${isDetected ? "Live contact" : "Hidden debug reveal"}`,
           `Status: ${platform.status}`,
           `Combat Phase: ${platform.combatPhase ?? "none"}`,
           `Origin: ${platform.originId ?? "Unknown"}`,
           `Target: ${platform.targetId ?? "Unassigned"}`,
           `Threat Level: ${platform.threatLevel.toFixed(2)}`,
-          `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)}`,
+          `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)} km/h`,
           `Durability/Evasion/Signature: ${platform.combat.durability.toFixed(0)} / ${platform.combat.evasion.toFixed(2)} / ${platform.combat.signature.toFixed(2)}`,
           `Weapons: ${formatWeaponSummary(platform)}`,
           platform.disengageReason
@@ -206,6 +212,31 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
             : "Breakaway: none",
         ],
       });
+    }
+  }
+
+  if (!data.showHiddenEnemies) {
+    const detectedEnemyIds = new Set(data.detectionState.detectedEnemyIds);
+    for (const contact of data.detectionState.lastKnownEnemyContacts) {
+      if (detectedEnemyIds.has(contact.enemyId) || contact.staleTicks <= 0) {
+        continue;
+      }
+
+      if (
+        Math.hypot(contact.position.x - x, contact.position.y - y) <=
+        hoverRadius
+      ) {
+        items.push({
+          icon: "?",
+          title: `${contact.enemyName} last seen`,
+          lines: [
+            `Type: Last known ${contact.platformClass}`,
+            `Last detector: ${contact.detectedBy}`,
+            `Stale: ${contact.staleTicks} ticks`,
+            `Position: (${Math.round(contact.position.x)}, ${Math.round(contact.position.y)})`,
+          ],
+        });
+      }
     }
   }
 

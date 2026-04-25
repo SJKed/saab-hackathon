@@ -1,6 +1,7 @@
 import type { NormalizedMapData } from "../../data/loader";
 import type { ResourceAssignment } from "../../engine/allocation";
 import type { CombatLogEvent } from "../../engine/combat";
+import type { DetectionState } from "../../engine/detection";
 import type {
   AlliedCity,
   AlliedSpawnZone,
@@ -28,6 +29,8 @@ export type EntityRenderData = {
   enemyBases: EnemyBase[];
   enemyPlatforms: MobilePlatform[];
   alliedPlatforms: MobilePlatform[];
+  detectionState: DetectionState;
+  showHiddenEnemies: boolean;
   assignments: ResourceAssignment[];
   combatEffects: CombatVisualEffect[];
   terrain: NormalizedMapData["terrain"];

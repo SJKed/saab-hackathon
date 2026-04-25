@@ -4,6 +4,7 @@ import type {
   EnemyBase,
   MobilePlatform,
 } from "../../models/entity";
+import type { LastKnownEnemyContact } from "../../engine/detection";
 import { isPlatformDeployed } from "../../models/platform-utils";
 import {
   alliedPlatformColor,
@@ -96,6 +97,7 @@ function drawImagePlatformIcon(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
   platform: MobilePlatform,
+  alpha: number,
 ): boolean {
   if (!image.complete || image.naturalWidth === 0) {
     return false;
@@ -105,7 +107,7 @@ function drawImagePlatformIcon(
   ctx.save();
   ctx.translate(platform.position.x, platform.position.y);
   ctx.rotate(getPlatformHeading(platform));
-  ctx.globalAlpha = platform.team === "allied" ? 0.95 : 0.92;
+  ctx.globalAlpha = alpha;
   ctx.filter = getPlatformTint(platform.team, platform.platformClass);
   ctx.drawImage(image, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
   ctx.restore();
@@ -140,10 +142,15 @@ function drawBallisticMissile(
   ctx.restore();
 }
 
-function drawPlatform(ctx: CanvasRenderingContext2D, platform: MobilePlatform): void {
+function drawPlatform(
+  ctx: CanvasRenderingContext2D,
+  platform: MobilePlatform,
+  options?: { alpha?: number; debugHidden?: boolean },
+): void {
   const x = platform.position.x;
   const y = platform.position.y;
   const accent = platform.team === "allied" ? alliedPlatformColor : enemyColor;
+  const alpha = options?.alpha ?? 1;
   const haloFill =
     platform.team === "allied"
       ? "rgba(115, 210, 255, 0.16)"
@@ -157,6 +164,8 @@ function drawPlatform(ctx: CanvasRenderingContext2D, platform: MobilePlatform): 
         ? 14
         : 11;
 
+  ctx.save();
+  ctx.globalAlpha = alpha;
   ctx.fillStyle = haloFill;
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1.2;
@@ -178,10 +187,20 @@ function drawPlatform(ctx: CanvasRenderingContext2D, platform: MobilePlatform): 
     ctx.stroke();
   }
 
+  if (options?.debugHidden) {
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = "rgba(224, 224, 224, 0.52)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   const icon = getPlatformIcon(platform.platformClass);
   if (platform.platformClass === "ballisticMissile") {
     drawBallisticMissile(ctx, platform);
-  } else if (!icon || !drawImagePlatformIcon(ctx, icon, platform)) {
+  } else if (!icon || !drawImagePlatformIcon(ctx, icon, platform, alpha)) {
     ctx.fillStyle = accent;
     ctx.beginPath();
     ctx.arc(x, y, 5, 0, Math.PI * 2);
@@ -189,6 +208,44 @@ function drawPlatform(ctx: CanvasRenderingContext2D, platform: MobilePlatform): 
   }
 
   drawLabel(ctx, platform.name ?? platform.id, x, y - 14);
+  ctx.restore();
+}
+
+function drawGhostContact(
+  ctx: CanvasRenderingContext2D,
+  contact: LastKnownEnemyContact,
+): void {
+  const x = contact.position.x;
+  const y = contact.position.y;
+  const ageAlpha = Math.max(0.18, Math.min(0.48, 0.5 - contact.staleTicks * 0.015));
+  const radius =
+    contact.platformClass === "fighterJet"
+      ? 15
+      : contact.platformClass === "drone"
+        ? 13
+        : 10;
+
+  ctx.save();
+  ctx.globalAlpha = ageAlpha;
+  ctx.strokeStyle = "rgba(255, 209, 102, 0.92)";
+  ctx.fillStyle = "rgba(255, 209, 102, 0.08)";
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = "rgba(255, 209, 102, 0.7)";
+  ctx.beginPath();
+  ctx.moveTo(x - radius * 0.7, y - radius * 0.7);
+  ctx.lineTo(x + radius * 0.7, y + radius * 0.7);
+  ctx.moveTo(x + radius * 0.7, y - radius * 0.7);
+  ctx.lineTo(x - radius * 0.7, y + radius * 0.7);
+  ctx.stroke();
+  drawLabel(ctx, `${contact.enemyName} last seen`, x, y - 14);
+  ctx.restore();
 }
 
 export function drawObjectivesAndPlatforms(
@@ -208,8 +265,27 @@ export function drawObjectivesAndPlatforms(
   }
 
   for (const platform of data.enemyPlatforms) {
-    if (isPlatformDeployed(platform)) {
+    if (!isPlatformDeployed(platform)) {
+      continue;
+    }
+
+    const isDetected = data.detectionState.detectedEnemyIds.includes(platform.id);
+    if (isDetected) {
       drawPlatform(ctx, platform);
+    } else if (data.showHiddenEnemies) {
+      drawPlatform(ctx, platform, {
+        alpha: 0.34,
+        debugHidden: true,
+      });
+    }
+  }
+
+  if (!data.showHiddenEnemies) {
+    const detectedEnemyIds = new Set(data.detectionState.detectedEnemyIds);
+    for (const contact of data.detectionState.lastKnownEnemyContacts) {
+      if (!detectedEnemyIds.has(contact.enemyId) && contact.staleTicks > 0) {
+        drawGhostContact(ctx, contact);
+      }
     }
   }
 

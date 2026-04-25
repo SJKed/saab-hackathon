@@ -1,5 +1,9 @@
 import { allocateResources } from "../engine/allocation";
 import { resolveCombat } from "../engine/combat";
+import {
+  calculateDetectionState,
+  getDetectedEnemyPlatforms,
+} from "../engine/detection";
 import { coordinateEnemyDeployments } from "../engine/enemy-director";
 import { updateMetricsState } from "../engine/metrics";
 import { calculateThreatsForCities } from "../engine/threat";
@@ -43,12 +47,24 @@ export function advanceSimulation(
     state.mapData.bounds,
     debugSettings,
   );
+  const allocationDetectionState = calculateDetectionState({
+    alliedCities: state.alliedCities,
+    alliedSpawnZones: state.alliedSpawnZones,
+    alliedPlatforms: state.alliedPlatforms,
+    enemyPlatforms,
+    previousState: state.detectionState,
+    tick: nextTick,
+  });
+  const detectedEnemyPlatforms = getDetectedEnemyPlatforms(
+    enemyPlatforms,
+    allocationDetectionState,
+  );
 
   const allocationResult = allocateResources(
     state.alliedCities,
     state.alliedSpawnZones,
     state.alliedPlatforms,
-    enemyPlatforms,
+    detectedEnemyPlatforms,
     state.alliedPostureMemory,
     deltaSeconds,
     debugSettings,
@@ -82,12 +98,20 @@ export function advanceSimulation(
     state.alliedPlatforms,
     activeAssignments,
     state.alliedCities,
-    enemyPlatforms,
+    detectedEnemyPlatforms,
     state.alliedSpawnZones,
     deltaSeconds,
     state.mapData.bounds,
     debugSettings,
   );
+  const detectionState = calculateDetectionState({
+    alliedCities: state.alliedCities,
+    alliedSpawnZones: state.alliedSpawnZones,
+    alliedPlatforms,
+    enemyPlatforms,
+    previousState: allocationDetectionState,
+    tick: nextTick,
+  });
 
   const combatResolution = resolveCombat({
     alliedCities: state.alliedCities,
@@ -95,6 +119,7 @@ export function advanceSimulation(
     enemyBases: state.enemyBases,
     alliedPlatforms,
     enemyPlatforms,
+    detectedEnemyIds: detectionState.detectedEnemyIds,
     tick: nextTick,
     debugSettings,
   });
@@ -124,12 +149,13 @@ export function advanceSimulation(
     ...state,
     alliedCities: calculateThreatsForCities(
       combatResolution.alliedCities,
-      enemyPlatforms,
+      getDetectedEnemyPlatforms(enemyPlatforms, detectionState),
     ),
     alliedSpawnZones: combatResolution.alliedSpawnZones,
     enemyBases: combatResolution.enemyBases,
     alliedPlatforms,
     enemyPlatforms,
+    detectionState,
     assignments: activeAssignments,
     operatorAssignments,
     advisorAssignments: allocationResult.assignments,
