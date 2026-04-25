@@ -10,6 +10,10 @@ import type {
   MobilePlatform,
 } from "../../models/entity";
 import {
+  isEnemyBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../../models/debug";
+import {
   clonePlatform,
   isPlatformStored,
 } from "../../models/platform-utils";
@@ -38,6 +42,7 @@ export function updateEnemyPositions(
   enemyBases: EnemyBase[],
   deltaSeconds: number,
   bounds: MapBounds,
+  debugSettings: DebugSettings,
 ): MobilePlatform[] {
   if (deltaSeconds <= 0) {
     return enemyPlatforms.map(clonePlatform);
@@ -49,6 +54,7 @@ export function updateEnemyPositions(
       [],
       enemyBases,
       deltaSeconds,
+      debugSettings.fuelBurnMultiplier,
     );
 
     if (platform.status === "destroyed") {
@@ -57,6 +63,13 @@ export function updateEnemyPositions(
 
     if (isPlatformStored(platform)) {
       if (platform.deploymentDelaySeconds > 0) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      if (isEnemyBaseDeploymentDisabled(debugSettings, platform.originId)) {
         return {
           ...platform,
           velocity: { x: 0, y: 0 },
@@ -107,10 +120,7 @@ export function updateEnemyPositions(
       );
     }
 
-    if (
-      !platform.oneWay &&
-      (platform.status === "returning" || !hasRemainingAmmo(platform))
-    ) {
+    if (platform.status === "returning" || !hasRemainingAmmo(platform)) {
       return routePlatformToClosestBase(platform, [], enemyBases, deltaSeconds, bounds);
     }
 

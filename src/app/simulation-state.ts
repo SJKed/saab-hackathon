@@ -46,6 +46,9 @@ export type SimulationState = {
   enemyPlatforms: MobilePlatform[];
   detectionState: DetectionState;
   assignments: ResourceAssignment[];
+  operatorAssignments: ResourceAssignment[];
+  advisorAssignments: ResourceAssignment[];
+  trainingFeedback: string[];
   eventLog: CombatLogEvent[];
   combatEffects: CombatVisualEffect[];
   alliedPostureMemory: TeamPostureMemory;
@@ -149,10 +152,9 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
   const alliedPosture = applyPostureMemory(
     evaluateAlliedForcePosture(
       alliedCities,
+      alliedSpawnZones,
       alliedPlatforms,
-      enemyPlatforms.filter((enemyPlatform) =>
-        detectionState.detectedEnemyIds.includes(enemyPlatform.id),
-      ),
+      enemyPlatforms,
     ),
     alliedPostureMemory,
     0,
@@ -167,6 +169,9 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
     enemyPlatforms,
     detectionState,
     assignments: [],
+    operatorAssignments: [],
+    advisorAssignments: [],
+    trainingFeedback: [],
     eventLog: [],
     combatEffects: [],
     alliedPostureMemory: alliedPosture.memory,

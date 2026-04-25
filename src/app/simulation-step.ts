@@ -7,11 +7,15 @@ import {
 import { coordinateEnemyDeployments } from "../engine/enemy-director";
 import { updateMetricsState } from "../engine/metrics";
 import { calculateThreatsForCities } from "../engine/threat";
+import { buildTrainingFeedback } from "../engine/training-feedback";
+import { isPlatformDestroyed } from "../models/platform-utils";
 import {
   updateEnemyPositions,
   updateResourcePositions,
 } from "../simulation/updater";
 import { mapCombatEventsToEffects } from "../ui/renderer";
+import type { DebugSettings } from "../models/debug";
+import type { CommandMode } from "../models/training";
 import type { SimulationState } from "./simulation-state";
 
 const maxEventLogEntries = 60;
@@ -20,6 +24,8 @@ export function advanceSimulation(
   state: SimulationState,
   deltaSeconds: number,
   effectCreatedAtMs: number,
+  debugSettings: DebugSettings,
+  commandMode: CommandMode,
 ): SimulationState {
   const nextTick = state.simulationTick + 1;
   const enemyDeploymentState = coordinateEnemyDeployments(
@@ -30,6 +36,7 @@ export function advanceSimulation(
     state.enemyPlatforms,
     state.enemyBases,
     deltaSeconds,
+    debugSettings,
   );
   let enemyPlatforms = updateEnemyPositions(
     enemyDeploymentState.enemyPlatforms,
@@ -38,6 +45,7 @@ export function advanceSimulation(
     state.enemyBases,
     deltaSeconds,
     state.mapData.bounds,
+    debugSettings,
   );
   const allocationDetectionState = calculateDetectionState({
     alliedCities: state.alliedCities,
@@ -54,25 +62,47 @@ export function advanceSimulation(
 
   const allocationResult = allocateResources(
     state.alliedCities,
+    state.alliedSpawnZones,
     state.alliedPlatforms,
     detectedEnemyPlatforms,
     state.alliedPostureMemory,
     deltaSeconds,
+    debugSettings,
   );
+  const operatorAssignments =
+    commandMode === "training"
+      ? state.operatorAssignments.filter((assignment) => {
+          const resource = state.alliedPlatforms.find(
+            (platform) => platform.id === assignment.resourceId,
+          );
+          if (!resource || isPlatformDestroyed(resource)) {
+            return false;
+          }
+
+          return assignment.mission === "intercept"
+            ? enemyPlatforms.some((enemy) => enemy.id === assignment.targetId)
+            : state.alliedCities.some((city) => city.id === assignment.targetId);
+        })
+      : [];
+  const activeAssignments =
+    commandMode === "training"
+      ? operatorAssignments
+      : allocationResult.assignments;
   const metricsState = updateMetricsState(
     state.metricsState,
     enemyPlatforms,
-    allocationResult.assignments,
+    activeAssignments,
     nextTick,
   );
   let alliedPlatforms = updateResourcePositions(
     state.alliedPlatforms,
-    allocationResult.assignments,
+    activeAssignments,
     state.alliedCities,
     detectedEnemyPlatforms,
     state.alliedSpawnZones,
     deltaSeconds,
     state.mapData.bounds,
+    debugSettings,
   );
   const detectionState = calculateDetectionState({
     alliedCities: state.alliedCities,
@@ -91,6 +121,7 @@ export function advanceSimulation(
     enemyPlatforms,
     detectedEnemyIds: detectionState.detectedEnemyIds,
     tick: nextTick,
+    debugSettings,
   });
 
   alliedPlatforms = combatResolution.alliedPlatforms;
@@ -125,7 +156,13 @@ export function advanceSimulation(
     alliedPlatforms,
     enemyPlatforms,
     detectionState,
-    assignments: allocationResult.assignments,
+    assignments: activeAssignments,
+    operatorAssignments,
+    advisorAssignments: allocationResult.assignments,
+    trainingFeedback:
+      commandMode === "training"
+        ? buildTrainingFeedback(operatorAssignments, allocationResult.assignments)
+        : [],
     alliedPostureMemory: allocationResult.postureMemory,
     alliedPostureSnapshot: allocationResult.postureSnapshot,
     responsePlannerSnapshot: allocationResult.plannerSnapshot,

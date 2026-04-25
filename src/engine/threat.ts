@@ -20,16 +20,13 @@ export function calculateCityThreat(
     const strikeWeight =
       enemyPlatform.platformClass === "ballisticMissile" ? 1.35 : 1;
 
-    return totalThreat + (enemyPlatform.threatLevel * strikeWeight) / distance;
-  }, 0);
+        return totalThreat + (enemyPlatform.threatLevel * strikeWeight) / distance;
+    }, 0);
 }
 
-export function calculateThreatsForCities(
-  cities: AlliedCity[],
-  enemyPlatforms: MobilePlatform[],
-): AlliedCity[] {
-  return cities.map((city) => ({
-    ...city,
-    threat: calculateCityThreat(city, enemyPlatforms),
-  }));
+export function calculateThreatsForCities(cities: AlliedCity[], enemyPlatforms: MobilePlatform[]): AlliedCity[] {
+    return cities.map((city) => ({
+        ...city,
+        threat: calculateCityThreat(city, enemyPlatforms),
+    }));
 }

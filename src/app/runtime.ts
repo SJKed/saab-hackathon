@@ -8,11 +8,17 @@ import type { AppShell } from "./dom";
 import { advanceSimulation } from "./simulation-step";
 import { createSimulationState, interpolateSimulationState } from "./simulation-state";
 import type { MapBounds } from "../data/loader";
+import type { ResourceAssignment } from "../engine/allocation";
 import { getMetricsSnapshot } from "../engine/metrics";
+import { distanceBetween, getPlatformDisplayName } from "../models/platform-utils";
+import type { TrainingDeployRequest } from "../models/training";
 import type { StrategyMode } from "../ui/controls";
 import { createControls } from "../ui/controls";
+import { createDebugMenu } from "../ui/debug-menu";
 import { createInfoPanel } from "../ui/info-panel";
+import { createModalRibbon } from "../ui/modal-ribbon";
 import { createMetricsHud } from "../ui/metrics-hud";
+import { createTrainingPanel } from "../ui/training-panel";
 import { drawTerrain, drawTooltip, renderEntities } from "../ui/renderer";
 
 const gridSize = 40;
@@ -54,9 +60,37 @@ function drawGrid(
 }
 
 export function startSimulation(shell: AppShell): void {
-  const controls = createControls(shell.appElement);
+  const modalRibbon = createModalRibbon(shell.appElement);
+  const controls = createControls(modalRibbon.workspace);
+  const debugMenu = createDebugMenu(modalRibbon.workspace);
   const metricsHud = createMetricsHud(shell.appElement);
-  const infoPanel = createInfoPanel(shell.appElement);
+  const infoPanel = createInfoPanel(modalRibbon.workspace);
+  const trainingPanel = createTrainingPanel(modalRibbon.workspace);
+
+  modalRibbon.registerPanel({
+    id: "controls",
+    label: "Controls",
+    panel: controls.root,
+    defaultVisible: true,
+  });
+  modalRibbon.registerPanel({
+    id: "debug",
+    label: "Debug",
+    panel: debugMenu.root,
+    defaultVisible: false,
+  });
+  modalRibbon.registerPanel({
+    id: "explain",
+    label: "Explain",
+    panel: infoPanel.root,
+    defaultVisible: true,
+  });
+  modalRibbon.registerPanel({
+    id: "training",
+    label: "Training",
+    panel: trainingPanel.root,
+    defaultVisible: false,
+  });
 
   let state = createSimulationState({
     width: window.innerWidth,
@@ -70,6 +104,94 @@ export function startSimulation(shell: AppShell): void {
   let lastPanPoint: { x: number; y: number } | null = null;
   let lastFrameTimestamp = performance.now();
   let tickAccumulatorMs = 0;
+  let lastCommandMode = controls.getState().commandMode;
+
+  function createOperatorAssignment(
+    request: TrainingDeployRequest,
+  ): ResourceAssignment | undefined {
+    const platform = state.alliedPlatforms.find(
+      (candidate) => candidate.id === request.resourceId,
+    );
+    if (!platform) {
+      return undefined;
+    }
+
+    if (request.mission === "intercept") {
+      const target = state.enemyPlatforms.find(
+        (candidate) => candidate.id === request.targetId,
+      );
+      if (!target) {
+        return undefined;
+      }
+
+      return {
+        mission: "intercept",
+        targetId: target.id,
+        targetName: getPlatformDisplayName(target),
+        resourceId: platform.id,
+        resourceName: getPlatformDisplayName(platform),
+        distance: distanceBetween(platform.position, target.position),
+        threatScore: target.threatLevel,
+        priorityScore: target.threatLevel * 10,
+        reason:
+          "Operator-issued training command. The AI advisor remains available for comparison and critique.",
+      };
+    }
+
+    const city = state.alliedCities.find((candidate) => candidate.id === request.targetId);
+    if (!city) {
+      return undefined;
+    }
+
+    return {
+      mission: "reinforce",
+      targetId: city.id,
+      targetName: city.name ?? city.id,
+      resourceId: platform.id,
+      resourceName: getPlatformDisplayName(platform),
+      distance: distanceBetween(platform.position, city.position),
+      threatScore: city.threat,
+      priorityScore: city.threat * 100,
+      reason:
+        "Operator-issued training command. The AI advisor remains available for comparison and critique.",
+    };
+  }
+
+  function applyTrainingRequests(commandMode: typeof lastCommandMode): void {
+    if (commandMode !== "training") {
+      return;
+    }
+
+    const deployRequest = trainingPanel.consumeDeployRequest();
+    if (deployRequest) {
+      const assignment = createOperatorAssignment(deployRequest);
+      if (assignment) {
+        const operatorAssignments = [
+          ...state.operatorAssignments.filter(
+            (item) => item.resourceId !== assignment.resourceId,
+          ),
+          assignment,
+        ];
+        state = {
+          ...state,
+          operatorAssignments,
+          assignments: operatorAssignments,
+        };
+      }
+    }
+
+    const recallRequest = trainingPanel.consumeRecallRequest();
+    if (recallRequest) {
+      const operatorAssignments = state.operatorAssignments.filter(
+        (assignment) => assignment.resourceId !== recallRequest,
+      );
+      state = {
+        ...state,
+        operatorAssignments,
+        assignments: operatorAssignments,
+      };
+    }
+  }
 
   function getCanvasPoint(
     event: MouseEvent | PointerEvent | WheelEvent,
@@ -152,7 +274,9 @@ export function startSimulation(shell: AppShell): void {
     shell.ctx.restore();
     drawTooltip(shell.ctx, renderData);
     infoPanel.update(
-      state.assignments,
+      controls.getState().commandMode === "training"
+        ? state.advisorAssignments
+        : state.assignments,
       state.eventLog,
       state.alliedPostureSnapshot,
       state.responsePlannerSnapshot,
@@ -167,6 +291,24 @@ export function startSimulation(shell: AppShell): void {
         state.assignments,
       ),
     );
+    debugMenu.update({
+      alliedSpawnZones: state.alliedSpawnZones,
+      enemyBases: state.enemyBases,
+      alliedPlatforms: state.alliedPlatforms,
+      enemyPlatforms: state.enemyPlatforms,
+      assignments: state.assignments,
+      directorSnapshot: state.enemyDirectorState.snapshot,
+    });
+    trainingPanel.update({
+      commandMode: controls.getState().commandMode,
+      alliedCities: state.alliedCities,
+      alliedSpawnZones: state.alliedSpawnZones,
+      alliedPlatforms: state.alliedPlatforms,
+      enemyPlatforms: state.enemyPlatforms,
+      operatorAssignments: state.operatorAssignments,
+      advisorAssignments: state.advisorAssignments,
+      feedbackMessages: state.trainingFeedback,
+    });
   }
 
   function renderLoop(timestamp: number): void {
@@ -183,6 +325,31 @@ export function startSimulation(shell: AppShell): void {
     }
 
     const controlsState = controls.getState();
+    if (controlsState.commandMode !== lastCommandMode) {
+      tickAccumulatorMs = 0;
+      state = {
+        ...state,
+        assignments:
+          controlsState.commandMode === "training" ? state.operatorAssignments : [],
+        trainingFeedback: [],
+      };
+      lastCommandMode = controlsState.commandMode;
+    }
+
+    applyTrainingRequests(controlsState.commandMode);
+    if (controls.consumeStepRequest()) {
+      tickAccumulatorMs = 0;
+      previousState = state;
+      state = advanceSimulation(
+        state,
+        (simulationTickMs / 1000) *
+          getStrategySpeedFactor(controlsState.strategy),
+        timestamp,
+        debugMenu.getState(),
+        controlsState.commandMode,
+      );
+    }
+
     if (controlsState.isRunning) {
       tickAccumulatorMs += Math.max(0, deltaMs) * controlsState.speedMultiplier;
     } else {
@@ -200,6 +367,8 @@ export function startSimulation(shell: AppShell): void {
         (simulationTickMs / 1000) *
           getStrategySpeedFactor(controlsState.strategy),
         timestamp,
+        debugMenu.getState(),
+        controlsState.commandMode,
       );
       tickAccumulatorMs -= simulationTickMs;
       stepsProcessed += 1;

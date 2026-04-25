@@ -1,7 +1,15 @@
-import type { AlliedCity, MobilePlatform } from "../models/entity";
+import type {
+  AlliedCity,
+  AlliedSpawnZone,
+  EnemyBase,
+  MobilePlatform,
+} from "../models/entity";
 import { distanceKm } from "../models/distance";
 import {
-  getUsableAmmoCost,
+  hasReachedLatestSafeRecallMoment,
+} from "../models/platform-recovery";
+import {
+  hasUsablePayload,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
@@ -80,21 +88,7 @@ function getPlatformClassWeight(platform: MobilePlatform): number {
   }
 }
 
-function hasUsablePayload(platform: MobilePlatform): boolean {
-  if (platform.oneWay) {
-    return true;
-  }
-
-  return platform.weapons.some(
-    (weapon) => weapon.ammunition >= getUsableAmmoCost(weapon),
-  );
-}
-
 function getPayloadReadiness(platform: MobilePlatform): number {
-  if (platform.oneWay) {
-    return 1;
-  }
-
   if (platform.weapons.length === 0) {
     return 0.45;
   }
@@ -274,6 +268,7 @@ export function applyPostureMemory<TSnapshot extends BaseTeamPostureSnapshot<unk
 
 export function evaluateAlliedForcePosture(
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
 ): AlliedForcePostureSnapshot {
@@ -286,6 +281,12 @@ export function evaluateAlliedForcePosture(
 
       for (const alliedPlatform of alliedPlatforms) {
         if (isPlatformDestroyed(alliedPlatform) || !hasUsablePayload(alliedPlatform)) {
+          continue;
+        }
+        if (
+          isPlatformDeployed(alliedPlatform) &&
+          hasReachedLatestSafeRecallMoment(alliedPlatform, alliedSpawnZones, [])
+        ) {
           continue;
         }
 
@@ -346,6 +347,12 @@ export function evaluateAlliedForcePosture(
     if (isPlatformDestroyed(alliedPlatform) || !hasUsablePayload(alliedPlatform)) {
       continue;
     }
+    if (
+      isPlatformDeployed(alliedPlatform) &&
+      hasReachedLatestSafeRecallMoment(alliedPlatform, alliedSpawnZones, [])
+    ) {
+      continue;
+    }
 
     const burden = getPlatformBurdenScore(alliedPlatform);
     if (isPlatformDeployed(alliedPlatform)) {
@@ -403,6 +410,7 @@ export function evaluateEnemyForcePosture(
   cities: AlliedCity[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
+  enemyBases: EnemyBase[],
   aggressionMultiplier: number,
 ): EnemyForcePostureSnapshot {
   const cityStates = cities
@@ -431,7 +439,8 @@ export function evaluateEnemyForcePosture(
         if (
           isPlatformDestroyed(enemyPlatform) ||
           !isPlatformDeployed(enemyPlatform) ||
-          !hasUsablePayload(enemyPlatform)
+          !hasUsablePayload(enemyPlatform) ||
+          hasReachedLatestSafeRecallMoment(enemyPlatform, [], enemyBases)
         ) {
           continue;
         }
@@ -459,7 +468,12 @@ export function evaluateEnemyForcePosture(
   let reserveScore = 0;
 
   for (const enemyPlatform of enemyPlatforms) {
-    if (isPlatformDestroyed(enemyPlatform) || !hasUsablePayload(enemyPlatform)) {
+    if (
+      isPlatformDestroyed(enemyPlatform) ||
+      !hasUsablePayload(enemyPlatform) ||
+      (isPlatformDeployed(enemyPlatform) &&
+        hasReachedLatestSafeRecallMoment(enemyPlatform, [], enemyBases))
+    ) {
       continue;
     }
 

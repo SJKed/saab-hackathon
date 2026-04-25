@@ -174,21 +174,33 @@ export function mapCombatEventsToEffects(
         continue;
       }
 
-      if (event.weaponClass === "bomb") {
+      if (event.weaponClass === "bomb" || event.weaponClass === "terminalPayload") {
         if (!isMiss) {
           const burst = createCombatEffect(
             `${event.id}-burst`,
             "strikeBurst",
             event,
             createdAtMs,
-            isCritical ? 1.35 : 1.15,
+            event.weaponClass === "terminalPayload"
+              ? isCritical
+                ? 1.45
+                : 1.25
+              : isCritical
+                ? 1.35
+                : 1.15,
           );
           const impact = createCombatEffect(
             `${event.id}-impact`,
             "impactRing",
             event,
             createdAtMs,
-            isCritical ? 1.35 : 1.2,
+            event.weaponClass === "terminalPayload"
+              ? isCritical
+                ? 1.5
+                : 1.3
+              : isCritical
+                ? 1.35
+                : 1.2,
           );
           if (burst) {
             effects.push(burst);

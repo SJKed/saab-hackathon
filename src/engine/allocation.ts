@@ -1,20 +1,28 @@
 import type {
   AlliedCity,
+  AlliedSpawnZone,
   MobilePlatform,
   PlatformClass,
   Weapon,
 } from "../models/entity";
 import { distanceKm } from "../models/distance";
 import {
+  isAlliedBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../models/debug";
+import { getMissionFuelBudgetSeconds } from "../models/platform-recovery";
+import {
   getPlatformDisplayName,
+  getPrimaryPayloadWeapon,
   getPlatformTargetType,
-  getUsableAmmoCost,
+  getWeaponPayloadDamage,
+  hasUsableAmmo,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
   weaponSupportsTarget,
 } from "../models/platform-utils";
-import { predictIntercept } from "./intercept";
+import { getPlatformTransitSpeed, predictIntercept } from "./intercept";
 import {
   applyPostureMemory,
   evaluateAlliedForcePosture,
@@ -58,7 +66,13 @@ type OriginReserve = {
   byClass: Record<PlatformClass, number>;
 };
 
-function isPlatformAvailable(platform: MobilePlatform): boolean {
+const interceptFuelCommitmentBufferSeconds = 3;
+const reinforcementFuelCommitmentBufferSeconds = 6;
+
+function isPlatformAvailable(
+  platform: MobilePlatform,
+  debugSettings: DebugSettings,
+): boolean {
   if (platform.team !== "allied") {
     return false;
   }
@@ -75,11 +89,18 @@ function isPlatformAvailable(platform: MobilePlatform): boolean {
     return false;
   }
 
+  if (
+    isPlatformStored(platform) &&
+    isAlliedBaseDeploymentDisabled(debugSettings, platform.originId)
+  ) {
+    return false;
+  }
+
   return platform.enduranceSeconds > 8;
 }
 
 function hasAmmo(weapon: Weapon): boolean {
-  return weapon.ammunition >= getUsableAmmoCost(weapon);
+  return hasUsableAmmo(weapon);
 }
 
 function createOriginReserve(): OriginReserve {
@@ -280,7 +301,14 @@ function getTerminalImpactEffectiveness(
   alliedPlatform: MobilePlatform,
   enemyPlatform: MobilePlatform,
 ): number {
-  const baseDamage = alliedPlatform.warheadDamage ?? 0;
+  const payloadWeapon =
+    getPrimaryPayloadWeapon(alliedPlatform, getPlatformTargetType(enemyPlatform)) ??
+    getPrimaryPayloadWeapon(alliedPlatform);
+  if (!payloadWeapon) {
+    return 0;
+  }
+
+  const baseDamage = getWeaponPayloadDamage(payloadWeapon);
   const damageWeight =
     (baseDamage * 1.2) / Math.max(40, enemyPlatform.combat.maxDurability);
   const terminalModifier =
@@ -333,18 +361,27 @@ function selectBestWeapon(
   };
 }
 
-function canReinforce(alliedPlatform: MobilePlatform): boolean {
+function canReinforce(
+  alliedPlatform: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+  debugSettings: DebugSettings,
+): boolean {
   return (
-    isPlatformAvailable(alliedPlatform) &&
-    alliedPlatform.weapons.some((weapon) => hasAmmo(weapon))
+    !alliedPlatform.oneWay &&
+    isPlatformAvailable(alliedPlatform, debugSettings) &&
+    alliedPlatform.weapons.some((weapon) => hasAmmo(weapon)) &&
+    getMissionFuelBudgetSeconds(alliedPlatform, alliedSpawnZones, []) >
+      reinforcementFuelCommitmentBufferSeconds
   );
 }
 
 function allocateHeuristicResources(
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
   postureSnapshot: AlliedForcePostureSnapshot,
+  debugSettings: DebugSettings,
 ): ResourceAssignment[] {
   const assignments: ResourceAssignment[] = [];
   const reservedPlatformIds = new Set<string>();
@@ -369,13 +406,13 @@ function allocateHeuristicResources(
     for (const alliedPlatform of alliedPlatforms) {
       if (
         reservedPlatformIds.has(alliedPlatform.id) ||
-        !isPlatformAvailable(alliedPlatform)
+        !isPlatformAvailable(alliedPlatform, debugSettings)
       ) {
         continue;
       }
 
       const weaponSelection = selectBestWeapon(alliedPlatform, enemyPlatform);
-      if (!weaponSelection && !alliedPlatform.oneWay) {
+      if (!weaponSelection) {
         continue;
       }
 
@@ -390,9 +427,10 @@ function allocateHeuristicResources(
 
       const enduranceMargin = Math.max(
         0,
-        alliedPlatform.enduranceSeconds - intercept.timeToIntercept,
+        getMissionFuelBudgetSeconds(alliedPlatform, alliedSpawnZones, []) -
+          intercept.timeToIntercept,
       );
-      if (enduranceMargin <= 4) {
+      if (enduranceMargin <= interceptFuelCommitmentBufferSeconds) {
         continue;
       }
       const reservePenalty = getReservePenalty(
@@ -405,8 +443,10 @@ function allocateHeuristicResources(
             (postureSnapshot.recallPressureActive ? 1.2 : 0.75)
           : 0;
       const platformEffectiveness = weaponSelection
-        ? weaponSelection.effectiveness
-        : getTerminalImpactEffectiveness(alliedPlatform, enemyPlatform);
+        ? alliedPlatform.oneWay
+          ? getTerminalImpactEffectiveness(alliedPlatform, enemyPlatform)
+          : weaponSelection.effectiveness
+        : 0;
 
       const score =
         priorityScore * 1.3 +
@@ -431,7 +471,7 @@ function allocateHeuristicResources(
       }
     }
 
-    if (!bestPlatform || (!bestWeapon && !bestPlatform.oneWay)) {
+    if (!bestPlatform || !bestWeapon) {
       continue;
     }
 
@@ -453,8 +493,9 @@ function allocateHeuristicResources(
       reason:
         bestPlatform.oneWay
           ? `${getPlatformDisplayName(bestPlatform)} is committed to a terminal intercept against ` +
-            `${getPlatformDisplayName(enemyPlatform)}. It will ram the target, inflict critical damage, ` +
-            `and be expended in the process. Impact timing and warhead yield make it the strongest last-ditch kill option. ${bestReserveContext}`
+            `${getPlatformDisplayName(enemyPlatform)}. It will expend its terminal payload in a one-way attack run, ` +
+            `inflict critical damage, and be lost in the process. Impact timing and payload yield make it the strongest ` +
+            `last-ditch kill option. ${bestReserveContext}`
           : `${getPlatformDisplayName(bestPlatform)} can acquire and intercept ` +
             `${getPlatformDisplayName(enemyPlatform)} before city impact using ` +
             `${bestWeapon?.name ?? "its selected weapon"}. Sensor reach, endurance margin, and weapon match ` +
@@ -519,12 +560,20 @@ function allocateHeuristicResources(
     for (const alliedPlatform of alliedPlatforms) {
       if (
         reservedPlatformIds.has(alliedPlatform.id) ||
-        !canReinforce(alliedPlatform)
+        !canReinforce(alliedPlatform, alliedSpawnZones, debugSettings)
       ) {
         continue;
       }
 
       const distance = distanceKm(alliedPlatform.position, city.position);
+      const travelTimeToCity =
+        distance / Math.max(1, getPlatformTransitSpeed(alliedPlatform));
+      if (
+        getMissionFuelBudgetSeconds(alliedPlatform, alliedSpawnZones, []) <=
+        travelTimeToCity + reinforcementFuelCommitmentBufferSeconds
+      ) {
+        continue;
+      }
       const reservePenalty = getReservePenalty(
         alliedPlatform,
         storedReserveByOrigin,
@@ -604,13 +653,20 @@ function allocateHeuristicResources(
 
 export function allocateResources(
   cities: AlliedCity[],
+  alliedSpawnZones: AlliedSpawnZone[],
   alliedPlatforms: MobilePlatform[],
   enemyPlatforms: MobilePlatform[],
   postureMemory: TeamPostureMemory,
   deltaSeconds: number,
+  debugSettings: DebugSettings,
 ): AllocationResult {
   const posture = applyPostureMemory(
-    evaluateAlliedForcePosture(cities, alliedPlatforms, enemyPlatforms),
+    evaluateAlliedForcePosture(
+      cities,
+      alliedSpawnZones,
+      alliedPlatforms,
+      enemyPlatforms,
+    ),
     postureMemory,
     deltaSeconds,
     {
@@ -621,15 +677,19 @@ export function allocateResources(
   const postureSnapshot = posture.snapshot;
   const heuristicAssignments = allocateHeuristicResources(
     cities,
+    alliedSpawnZones,
     alliedPlatforms,
     enemyPlatforms,
     postureSnapshot,
+    debugSettings,
   );
   const plannerInputs = generatePlannerCandidates({
     cities,
+    alliedSpawnZones,
     alliedPlatforms,
     enemyPlatforms,
     postureSnapshot,
+    debugSettings,
   });
   const plannedResult = runPortfolioPlanner({
     candidates: plannerInputs.candidates,

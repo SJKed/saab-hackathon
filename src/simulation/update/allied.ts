@@ -11,6 +11,10 @@ import {
 } from "../../models/platform-utils";
 import type { ResourceAssignment } from "../../engine/allocation";
 import {
+  isAlliedBaseDeploymentDisabled,
+  type DebugSettings,
+} from "../../models/debug";
+import {
   applyPassiveStateUpdates,
   hasRemainingAmmo,
   maneuverAgainstTarget,
@@ -29,6 +33,7 @@ export function updateResourcePositions(
   alliedSpawnZones: AlliedSpawnZone[],
   deltaSeconds: number,
   bounds: MapBounds,
+  debugSettings: DebugSettings,
 ): MobilePlatform[] {
   if (deltaSeconds <= 0) {
     return alliedPlatforms.map(clonePlatform);
@@ -40,6 +45,7 @@ export function updateResourcePositions(
       alliedSpawnZones,
       [],
       deltaSeconds,
+      debugSettings.fuelBurnMultiplier,
     );
 
     if (platform.status === "destroyed") {
@@ -51,6 +57,13 @@ export function updateResourcePositions(
         (item) => item.resourceId === platform.id,
       );
       if (!assignment) {
+        return {
+          ...platform,
+          velocity: { x: 0, y: 0 },
+        };
+      }
+
+      if (isAlliedBaseDeploymentDisabled(debugSettings, platform.originId)) {
         return {
           ...platform,
           velocity: { x: 0, y: 0 },
@@ -113,7 +126,7 @@ export function updateResourcePositions(
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
 
-    if (!hasRemainingAmmo(platform) && !platform.oneWay) {
+    if (!hasRemainingAmmo(platform)) {
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
 

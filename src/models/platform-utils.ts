@@ -60,6 +60,18 @@ export function getUsableAmmoCost(weapon: Weapon): number {
   return Math.max(1, weapon.salvoSize ?? 1);
 }
 
+export function hasUsableAmmo(weapon: Weapon): boolean {
+  return weapon.ammunition >= getUsableAmmoCost(weapon);
+}
+
+export function getWeaponPayloadDamage(weapon: Weapon): number {
+  return weapon.damagePerHit * (weapon.salvoSize ?? 1);
+}
+
+export function getWeaponBlastRadius(weapon: Weapon): number {
+  return weapon.blastRadius ?? 0;
+}
+
 export function getWeaponsForTarget(
   platform: MobilePlatform,
   targetType: TargetType,
@@ -67,8 +79,37 @@ export function getWeaponsForTarget(
   return platform.weapons.filter(
     (weapon) =>
       weaponSupportsTarget(weapon, targetType) &&
-      weapon.ammunition >= getUsableAmmoCost(weapon),
+      hasUsableAmmo(weapon),
   );
+}
+
+export function hasUsablePayload(platform: MobilePlatform): boolean {
+  return platform.weapons.some(hasUsableAmmo);
+}
+
+export function getPrimaryPayloadWeapon(
+  platform: MobilePlatform,
+  targetType?: TargetType,
+): Weapon | undefined {
+  const candidates = targetType
+    ? getWeaponsForTarget(platform, targetType)
+    : platform.weapons.filter(hasUsableAmmo);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return candidates.reduce((bestWeapon, weapon) => {
+    const bestScore =
+      getWeaponPayloadDamage(bestWeapon) * 1.25 +
+      getWeaponBlastRadius(bestWeapon) +
+      bestWeapon.maxRange * 0.25;
+    const weaponScore =
+      getWeaponPayloadDamage(weapon) * 1.25 +
+      getWeaponBlastRadius(weapon) +
+      weapon.maxRange * 0.25;
+
+    return weaponScore > bestScore ? weapon : bestWeapon;
+  });
 }
 
 export function weaponSupportsTarget(weapon: Weapon, targetType: TargetType): boolean {
@@ -93,12 +134,20 @@ export function getPreferredCombatRange(
   targetType: TargetType,
 ): number {
   if (platform.oneWay) {
-    return Math.max(12, (platform.impactRadius ?? 18) * 1.1);
+    const payloadWeapon = getPrimaryPayloadWeapon(platform, targetType);
+    if (!payloadWeapon) {
+      return 12;
+    }
+
+    return Math.max(
+      12,
+      payloadWeapon.maxRange + getWeaponBlastRadius(payloadWeapon) * 0.35,
+    );
   }
 
   const usableWeapons = getWeaponsForTarget(platform, targetType);
   if (usableWeapons.length === 0) {
-    return platform.platformClass === "ballisticMissile" ? 18 : 32;
+    return platform.platformClass === "ballisticMissile" ? 12 : 32;
   }
 
   const preferredWeapon = usableWeapons.reduce((bestWeapon, weapon) =>
@@ -114,6 +163,11 @@ export function getPreferredCombatRange(
       return Math.max(12, preferredWeapon.effectiveRange * 0.55);
     case "surfaceToAirMissile":
       return Math.max(44, preferredWeapon.effectiveRange * 0.8);
+    case "terminalPayload":
+      return Math.max(
+        12,
+        preferredWeapon.maxRange + getWeaponBlastRadius(preferredWeapon) * 0.35,
+      );
     default:
       return Math.max(20, preferredWeapon.effectiveRange * 0.7);
   }
