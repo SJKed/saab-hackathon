@@ -1,7 +1,13 @@
-import type { AlliedCity, MobilePlatform } from "../../models/entity";
+import type {
+  AlliedCity,
+  AlliedSpawnZone,
+  MobilePlatform,
+} from "../../models/entity";
+import { getMissionFuelBudgetSeconds } from "../../models/platform-recovery";
 import {
   distanceBetween,
   getPlatformDisplayName,
+  hasUsablePayload,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
@@ -26,7 +32,12 @@ type CandidateGenerationResult = {
   candidates: PlannerActionCandidate[];
 };
 
-function isPlannerAvailable(platform: MobilePlatform): boolean {
+const plannerFuelCommitmentBufferSeconds = 3;
+
+function isPlannerAvailable(
+  platform: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+): boolean {
   if (platform.team !== "allied") {
     return false;
   }
@@ -43,15 +54,14 @@ function isPlannerAvailable(platform: MobilePlatform): boolean {
     return false;
   }
 
-  return platform.enduranceSeconds > 8;
+  return (
+    getMissionFuelBudgetSeconds(platform, alliedSpawnZones, []) >
+    plannerFuelCommitmentBufferSeconds
+  );
 }
 
 function hasReusablePayload(platform: MobilePlatform): boolean {
-  if (platform.oneWay) {
-    return true;
-  }
-
-  return platform.weapons.some((weapon) => weapon.ammunition > 0);
+  return hasUsablePayload(platform);
 }
 
 function getReserveValuePreserved(
@@ -67,13 +77,16 @@ function getReserveValuePreserved(
 
 export function generatePlannerCandidates(input: {
   cities: AlliedCity[];
+  alliedSpawnZones: AlliedSpawnZone[];
   alliedPlatforms: MobilePlatform[];
   enemyPlatforms: MobilePlatform[];
   postureSnapshot: AlliedForcePostureSnapshot;
 }): CandidateGenerationResult {
   const beliefs = buildEnemyIntentBeliefs(input.cities, input.enemyPlatforms);
   const candidates: PlannerActionCandidate[] = [];
-  const availablePlatforms = input.alliedPlatforms.filter(isPlannerAvailable);
+  const availablePlatforms = input.alliedPlatforms.filter((platform) =>
+    isPlannerAvailable(platform, input.alliedSpawnZones),
+  );
 
   for (const enemyPlatform of input.enemyPlatforms.filter(isPlatformDeployed)) {
     const belief = beliefs.find((entry) => entry.enemyId === enemyPlatform.id);
@@ -90,6 +103,12 @@ export function generatePlannerCandidates(input: {
       .map((platform) => {
         const intercept = predictIntercept(platform, enemyPlatform, input.cities);
         if (!intercept?.feasibleBeforeImpact || !intercept.acquisitionFeasible) {
+          return undefined;
+        }
+        if (
+          getMissionFuelBudgetSeconds(platform, input.alliedSpawnZones, []) <=
+          intercept.timeToIntercept + plannerFuelCommitmentBufferSeconds
+        ) {
           return undefined;
         }
 

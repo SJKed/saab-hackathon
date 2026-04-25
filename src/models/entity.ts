@@ -4,7 +4,8 @@ export type WeaponClass =
   | "rapidFire"
   | "airToAirMissile"
   | "bomb"
-  | "surfaceToAirMissile";
+  | "surfaceToAirMissile"
+  | "terminalPayload";
 export type GuidanceType = "unguided" | "radar" | "infrared" | "command";
 export type SensorType = "radar" | "electroOptical" | "infrared" | "passive";
 export type UnitStatus =
@@ -112,8 +113,6 @@ export interface MobilePlatform {
   combat: PlatformCombatProfile;
   sensors: SensorProfile;
   weapons: Weapon[];
-  warheadDamage?: number;
-  impactRadius?: number;
   interceptDifficulty?: number;
 }
 

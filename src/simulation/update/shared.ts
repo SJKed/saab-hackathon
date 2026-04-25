@@ -11,10 +11,17 @@ import type {
 } from "../../models/entity";
 import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../../models/platform-constants";
 import {
+  getClosestRecoveryBase as findClosestRecoveryBase,
+  hasReachedLatestSafeRecallMoment,
+  recoveryArrivalDistance,
+} from "../../models/platform-recovery";
+import {
   distanceBetween,
+  getPrimaryPayloadWeapon,
   getPlatformTargetType,
   getPreferredCombatRange,
-  getUsableAmmoCost,
+  getWeaponBlastRadius,
+  hasUsablePayload,
   isPlatformDestroyed,
   isPlatformStored,
 } from "../../models/platform-utils";
@@ -22,7 +29,7 @@ import { getPlatformTransitSpeed, predictLeadIntercept } from "../../engine/inte
 
 export const minimumDistanceToTarget = 8;
 export const minimumDistanceToAssignmentTarget = 10;
-export const minimumReturnDistance = 10;
+export const minimumReturnDistance = recoveryArrivalDistance;
 const oneWayTerminalHomingDistance = 22;
 const oneWayLeadHorizonSeconds = 1.35;
 const mapEdgePadding = 8;
@@ -67,29 +74,7 @@ export function getClosestRecoveryBase(
   alliedSpawnZones: AlliedSpawnZone[],
   enemyBases: EnemyBase[],
 ): { originId: string; position: Vector } | undefined {
-  const candidateBases =
-    platform.team === "allied"
-      ? alliedSpawnZones.map((zone) => ({
-          originId: zone.id,
-          position: zone.position,
-        }))
-      : enemyBases.map((base) => ({
-          originId: base.id,
-          position: base.position,
-        }));
-
-  let closestBase: { originId: string; position: Vector } | undefined;
-  let closestDistance = Number.POSITIVE_INFINITY;
-
-  for (const base of candidateBases) {
-    const distance = distanceBetween(platform.position, base.position);
-    if (distance < closestDistance) {
-      closestDistance = distance;
-      closestBase = base;
-    }
-  }
-
-  return closestBase;
+  return findClosestRecoveryBase(platform, alliedSpawnZones, enemyBases);
 }
 
 export function refreshWeapons(
@@ -103,12 +88,39 @@ export function refreshWeapons(
 }
 
 export function hasRemainingAmmo(platform: MobilePlatform): boolean {
-  if (platform.oneWay) {
-    return true;
+  return hasUsablePayload(platform);
+}
+
+function tryDockAtRecoveryBase(
+  platform: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+  enemyBases: EnemyBase[],
+): MobilePlatform | undefined {
+  if (
+    isPlatformDestroyed(platform) ||
+    isPlatformStored(platform) ||
+    platform.oneWay
+  ) {
+    return undefined;
   }
 
-  return platform.weapons.some(
-    (weapon) => weapon.ammunition >= getUsableAmmoCost(weapon),
+  const closestBase = getClosestRecoveryBase(platform, alliedSpawnZones, enemyBases);
+  if (!closestBase) {
+    return undefined;
+  }
+
+  const withinDockingRange =
+    distanceBetween(platform.position, closestBase.position) <= minimumReturnDistance;
+  if (!withinDockingRange) {
+    return undefined;
+  }
+
+  return resetPlatformAtOrigin(
+    {
+      ...platform,
+      originId: closestBase.originId,
+    },
+    closestBase.position,
   );
 }
 
@@ -134,6 +146,15 @@ export function applyPassiveStateUpdates(
     };
   }
 
+  const dockedPlatform = tryDockAtRecoveryBase(
+    platform,
+    alliedSpawnZones,
+    enemyBases,
+  );
+  if (dockedPlatform) {
+    return dockedPlatform;
+  }
+
   const refreshedWeapons = refreshWeapons(platform, deltaSeconds);
   const isAirborne =
     platform.status !== "stored" &&
@@ -143,6 +164,24 @@ export function applyPassiveStateUpdates(
     0,
     platform.enduranceSeconds - (isAirborne ? deltaSeconds : 0),
   );
+  if (isAirborne && enduranceSeconds <= 0) {
+    return {
+      ...platform,
+      velocity: { x: 0, y: 0 },
+      status: "destroyed",
+      targetId: undefined,
+      engagedWithId: undefined,
+      combatPhase: undefined,
+      combatPhaseTimeSeconds: 0,
+      disengageReason: "Fuel exhausted before recovery",
+      enduranceSeconds: 0,
+      combat: {
+        ...platform.combat,
+        durability: 0,
+      },
+      weapons: refreshedWeapons,
+    };
+  }
 
   let nextPlatform: MobilePlatform = {
     ...platform,
@@ -156,36 +195,23 @@ export function applyPassiveStateUpdates(
     weapons: refreshedWeapons,
   };
 
-  if (
-    !nextPlatform.oneWay &&
-    !isPlatformStored(nextPlatform) &&
-    enduranceSeconds <= 8 &&
-    !nextPlatform.engagedWithId
-  ) {
+  if (hasReachedLatestSafeRecallMoment(nextPlatform, alliedSpawnZones, enemyBases)) {
     nextPlatform = {
       ...nextPlatform,
-      status: "returning",
+      status: nextPlatform.engagedWithId ? nextPlatform.status : "returning",
       combatPhase: "disengaging",
-      disengageReason: "Fuel reserve exhausted",
+      disengageReason: "Fuel low; returning while recovery window remains",
       targetId: nextPlatform.originId,
     };
   }
 
-  const originPosition = getOriginPosition(
+  const updatedDockedPlatform = tryDockAtRecoveryBase(
     nextPlatform,
     alliedSpawnZones,
     enemyBases,
   );
-  if (!originPosition) {
-    return nextPlatform;
-  }
-
-  const distanceToOrigin = distanceBetween(nextPlatform.position, originPosition);
-  if (
-    distanceToOrigin <= minimumReturnDistance &&
-    (nextPlatform.status === "returning" || nextPlatform.status === "idle")
-  ) {
-    return resetPlatformAtOrigin(nextPlatform, originPosition);
+  if (updatedDockedPlatform) {
+    return updatedDockedPlatform;
   }
 
   return nextPlatform;
@@ -285,11 +311,13 @@ export function routePlatformToClosestBase(
     targetId: closestBase.originId,
     status: "returning" as const,
   };
-  if (
-    distanceBetween(returningPlatform.position, closestBase.position) <=
-    minimumReturnDistance
-  ) {
-    return resetPlatformAtOrigin(returningPlatform, closestBase.position);
+  const dockedPlatform = tryDockAtRecoveryBase(
+    returningPlatform,
+    alliedSpawnZones,
+    enemyBases,
+  );
+  if (dockedPlatform) {
+    return dockedPlatform;
   }
 
   return movePlatformTowards(
@@ -412,9 +440,14 @@ export function maneuverAgainstTarget(
   const lateralSign = getCombatLateralSign(platform);
 
   if (platform.oneWay) {
+    const payloadWeapon =
+      getPrimaryPayloadWeapon(platform, targetType) ??
+      getPrimaryPayloadWeapon(platform);
+    const blastRadius = payloadWeapon ? getWeaponBlastRadius(payloadWeapon) : 0;
+    const payloadRange = payloadWeapon?.maxRange ?? minimumDistanceToTarget;
     const terminalDistance = Math.max(
       oneWayTerminalHomingDistance,
-      (platform.impactRadius ?? 12) * 2.4,
+      payloadRange + blastRadius * 1.4,
     );
     const leadPrediction = predictLeadIntercept(platform, target, {
       speedOverride: platform.maxSpeed,
@@ -430,7 +463,7 @@ export function maneuverAgainstTarget(
         disengageReason: undefined,
       },
       inTerminalHomingWindow ? target.position : leadPrediction?.point ?? target.position,
-      inTerminalHomingWindow ? 0 : Math.max(0, (platform.impactRadius ?? 10) * 0.18),
+      inTerminalHomingWindow ? 0 : Math.max(0, blastRadius * 0.18),
       platform.maxSpeed,
       deltaSeconds,
       bounds,

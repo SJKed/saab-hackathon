@@ -133,7 +133,12 @@ export function createSimulationState(canvasSize: CanvasSize): SimulationState {
   const enemyPlatforms = createEnemyDeployments(enemyBases, alliedCities);
   const alliedPostureMemory = createTeamPostureMemory();
   const alliedPosture = applyPostureMemory(
-    evaluateAlliedForcePosture(alliedCities, alliedPlatforms, enemyPlatforms),
+    evaluateAlliedForcePosture(
+      alliedCities,
+      alliedSpawnZones,
+      alliedPlatforms,
+      enemyPlatforms,
+    ),
     alliedPostureMemory,
     0,
   );

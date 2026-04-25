@@ -8,7 +8,7 @@ import { ENEMY_DEPLOYMENT_HOLD_SECONDS } from "../models/platform-constants";
 import {
   clonePlatform,
   distanceBetween,
-  getUsableAmmoCost,
+  hasUsablePayload,
   isPlatformDeployed,
   isPlatformDestroyed,
   isPlatformStored,
@@ -132,16 +132,6 @@ function getClassWeight(platform: MobilePlatform): number {
     default:
       return 1;
   }
-}
-
-function hasUsablePayload(platform: MobilePlatform): boolean {
-  if (platform.oneWay) {
-    return true;
-  }
-
-  return platform.weapons.some(
-    (weapon) => weapon.ammunition >= getUsableAmmoCost(weapon),
-  );
 }
 
 function getCoverageContribution(
@@ -519,6 +509,7 @@ export function coordinateEnemyDeployments(
       alliedCities,
       alliedPlatforms,
       enemyPlatforms,
+      enemyBases,
       profile.aggressionPercent / 100,
     ),
     state.postureMemory,

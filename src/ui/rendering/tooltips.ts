@@ -135,7 +135,7 @@ function collectTooltipItems(data: EntityRenderData): TooltipItem[] {
           `Speed: ${platform.cruiseSpeed.toFixed(0)} / ${platform.maxSpeed.toFixed(0)}`,
           `Durability/Evasion/Signature: ${platform.combat.durability.toFixed(0)} / ${platform.combat.evasion.toFixed(2)} / ${platform.combat.signature.toFixed(2)}`,
           `Sensors: ${platform.sensors.sensorType} ${platform.sensors.sensorRange.toFixed(0)}m`,
-          `Endurance: ${platform.enduranceSeconds.toFixed(0)} / ${platform.maxEnduranceSeconds.toFixed(0)} s`,
+          `Fuel: ${platform.enduranceSeconds.toFixed(0)} / ${platform.maxEnduranceSeconds.toFixed(0)} s`,
           `Weapons: ${formatWeaponSummary(platform)}`,
           platform.disengageReason
             ? `Breakaway: ${platform.disengageReason}`

@@ -113,7 +113,7 @@ export function updateResourcePositions(
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
 
-    if (!hasRemainingAmmo(platform) && !platform.oneWay) {
+    if (!hasRemainingAmmo(platform)) {
       return routePlatformToClosestBase(platform, alliedSpawnZones, [], deltaSeconds, bounds);
     }
 

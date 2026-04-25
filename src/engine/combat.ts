@@ -8,13 +8,16 @@ import type {
   Vector,
   Weapon,
 } from "../models/entity";
+import { hasReachedLatestSafeRecallMoment } from "../models/platform-recovery";
 import {
   clonePlatform,
   distanceBetween,
   getPlatformDisplayName,
+  getPrimaryPayloadWeapon,
   getPlatformTargetType,
   getPreferredCombatRange,
   getUsableAmmoCost,
+  getWeaponPayloadDamage,
   getWeaponShotInterval,
   getWeaponsForTarget,
   isPlatformDeployed,
@@ -90,7 +93,6 @@ const attackRunWindowSeconds = 0.75;
 const repositionWindowSeconds = 1.1;
 const evadeWindowSeconds = 0.8;
 const disengageWindowSeconds = 2.2;
-const enduranceRetreatThresholdSeconds = 14;
 const durabilityRetreatRatio = 0.24;
 const lockLossRangeMultiplier = 1.55;
 const deadlockRelativeSpeedThreshold = 9;
@@ -649,16 +651,22 @@ function resolvePlatformFire(
 ): FireResult {
   const distance = distanceBetween(attacker.position, targetPlatform.position);
   const targetType = getPlatformTargetType(targetPlatform);
+  const payloadWeapon = attacker.oneWay
+    ? getPrimaryPayloadWeapon(attacker, targetType) ??
+      getPrimaryPayloadWeapon(attacker)
+    : undefined;
 
   if (
     attacker.oneWay &&
-    distance <= (attacker.impactRadius ?? minimumStrikeDistance)
+    payloadWeapon &&
+    distance <= payloadWeapon.maxRange
   ) {
-    const impactDamage = (attacker.warheadDamage ?? 0) * 1.2;
+    const impactDamage = getWeaponPayloadDamage(payloadWeapon) * 1.2;
+    const expendedAttacker = applyWeaponUse(attacker, payloadWeapon);
     const destroyedAttacker: MobilePlatform = {
-      ...attacker,
+      ...expendedAttacker,
       combat: {
-        ...attacker.combat,
+        ...expendedAttacker.combat,
         durability: 0,
       },
       status: "destroyed",
@@ -680,7 +688,7 @@ function resolvePlatformFire(
       updatedTargetPlatform,
       targetPlatform.team === "allied" ? "allied-platform" : "enemy-platform",
       targetPlatform.position,
-      undefined,
+      payloadWeapon,
       impactDamage,
       {
         outcome: "critical",
@@ -843,12 +851,15 @@ function resolveMissileImpact(
   missile: MobilePlatform,
   targetCity: AlliedCity,
 ): { missile: MobilePlatform; city: AlliedCity; events: CombatLogEvent[] } {
-  const damage = missile.warheadDamage ?? 0;
+  const payloadWeapon =
+    getPrimaryPayloadWeapon(missile, "city") ?? getPrimaryPayloadWeapon(missile);
+  const damage = payloadWeapon ? getWeaponPayloadDamage(payloadWeapon) : 0;
   const city = applyDamageToObjective(targetCity, damage);
+  const expendedMissile = payloadWeapon ? applyWeaponUse(missile, payloadWeapon) : missile;
   const destroyedMissile: MobilePlatform = {
-    ...missile,
+    ...expendedMissile,
     combat: {
-      ...missile.combat,
+      ...expendedMissile.combat,
       durability: 0,
     },
     status: "destroyed",
@@ -864,7 +875,7 @@ function resolveMissileImpact(
       city,
       "allied-city",
       targetCity.position,
-      undefined,
+      payloadWeapon,
       damage,
     ),
     createDestroyedEvent(tick, destroyedMissile, "enemy-platform", missile.position),
@@ -960,16 +971,14 @@ function hasCompatiblePayload(
   platform: MobilePlatform,
   targetType: TargetType,
 ): boolean {
-  if (platform.oneWay) {
-    return true;
-  }
-
   return getWeaponsForTarget(platform, targetType).length > 0;
 }
 
 function refreshEngagementPhase(
   platform: MobilePlatform,
   target: MobilePlatform,
+  alliedSpawnZones: AlliedSpawnZone[],
+  enemyBases: EnemyBase[],
 ): MobilePlatform {
   const targetType = getPlatformTargetType(target);
   const preferredRange = getPreferredCombatRange(platform, targetType);
@@ -1006,17 +1015,20 @@ function refreshEngagementPhase(
     });
   }
 
+  if (hasReachedLatestSafeRecallMoment(platform, alliedSpawnZones, enemyBases)) {
+    return setCombatPhase(platform, "disengaging", {
+      engagedWithId: target.id,
+      disengageReason: "Breaking away while recovery fuel remains",
+    });
+  }
+
   if (
     !platform.oneWay &&
-    (platform.enduranceSeconds <= enduranceRetreatThresholdSeconds ||
-      getDurabilityRatio(platform) <= durabilityRetreatRatio)
+    getDurabilityRatio(platform) <= durabilityRetreatRatio
   ) {
     return setCombatPhase(platform, "disengaging", {
       engagedWithId: target.id,
-      disengageReason:
-        platform.enduranceSeconds <= enduranceRetreatThresholdSeconds
-          ? "Breaking away to preserve fuel reserve"
-          : "Breaking away after taking heavy damage",
+      disengageReason: "Breaking away after taking heavy damage",
     });
   }
 
@@ -1177,6 +1189,8 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
           disengageReason: alliedPlatform.disengageReason,
         }),
         enemyPlatform,
+        input.alliedSpawnZones,
+        input.enemyBases,
       );
       enemyPlatform = refreshEngagementPhase(
         setCombatPhase(enemyPlatform, enemyPlatform.combatPhase ?? "pursuing", {
@@ -1185,6 +1199,8 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
           disengageReason: enemyPlatform.disengageReason,
         }),
         alliedPlatform,
+        input.alliedSpawnZones,
+        input.enemyBases,
       );
 
       if (
@@ -1302,9 +1318,15 @@ export function resolveCombat(input: CombatResolutionInput): CombatResolutionRes
     }
 
     const distanceToCity = distanceBetween(enemyPlatform.position, targetCity.position);
+    const payloadWeapon =
+      enemyPlatform.oneWay
+        ? getPrimaryPayloadWeapon(enemyPlatform, "city") ??
+          getPrimaryPayloadWeapon(enemyPlatform)
+        : undefined;
     if (
       enemyPlatform.platformClass === "ballisticMissile" &&
-      distanceToCity <= (enemyPlatform.impactRadius ?? minimumStrikeDistance)
+      payloadWeapon &&
+      distanceToCity <= payloadWeapon.maxRange
     ) {
       const impact = resolveMissileImpact(input.tick, enemyPlatform, targetCity);
       enemyPlatforms[enemyIndex] = impact.missile;

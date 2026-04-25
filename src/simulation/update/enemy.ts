@@ -104,10 +104,7 @@ export function updateEnemyPositions(
       );
     }
 
-    if (
-      !platform.oneWay &&
-      (platform.status === "returning" || !hasRemainingAmmo(platform))
-    ) {
+    if (platform.status === "returning" || !hasRemainingAmmo(platform)) {
       return routePlatformToClosestBase(platform, [], enemyBases, deltaSeconds, bounds);
     }
 

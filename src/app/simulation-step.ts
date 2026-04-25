@@ -38,6 +38,7 @@ export function advanceSimulation(
 
   const allocationResult = allocateResources(
     state.alliedCities,
+    state.alliedSpawnZones,
     state.alliedPlatforms,
     enemyPlatforms,
     state.alliedPostureMemory,

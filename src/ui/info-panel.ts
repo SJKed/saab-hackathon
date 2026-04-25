@@ -286,6 +286,8 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
             ? "Rapid Fire"
             : assignment.weaponClass === "bomb"
               ? "Bomb"
+              : assignment.weaponClass === "terminalPayload"
+                ? "Terminal Payload"
               : "Weapon",
         assignment.mission === "intercept" ? lowTone : mediumTone,
       ),

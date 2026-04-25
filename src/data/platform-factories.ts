@@ -27,8 +27,6 @@ type PlatformTemplate = {
   sensors: SensorProfile;
   weapons: WeaponTemplate[];
   oneWay?: boolean;
-  warheadDamage?: number;
-  impactRadius?: number;
   interceptDifficulty?: number;
 };
 
@@ -98,6 +96,30 @@ const bombTemplate = (
   blastRadius: 18,
   salvoSize: 1,
   probabilityOfKillBase: 0.8,
+});
+
+const terminalPayloadTemplate = (
+  name: string,
+  damagePerHit: number,
+  maxRange: number,
+  blastRadius: number,
+  targetTypesSupported: Weapon["targetTypesSupported"],
+): WeaponTemplate => ({
+  name,
+  weaponClass: "terminalPayload",
+  maxAmmunition: 1,
+  damagePerHit,
+  rateOfFire: 1,
+  reloadTime: 9999,
+  minRange: 0,
+  effectiveRange: maxRange,
+  maxRange,
+  accuracy: 1,
+  guidanceType: "command",
+  targetTypesSupported,
+  blastRadius,
+  salvoSize: 1,
+  probabilityOfKillBase: 1,
 });
 
 const alliedFighterTemplate: PlatformTemplate = {
@@ -192,10 +214,16 @@ const alliedBallisticMissileTemplate: PlatformTemplate = {
     targetTypesSupported: ["fighterJet", "drone", "ballisticMissile"],
     jamResistance: 0.7,
   },
-  weapons: [],
+  weapons: [
+    terminalPayloadTemplate(
+      "Terminal Intercept Payload",
+      110,
+      10,
+      18,
+      ["fighterJet", "drone", "ballisticMissile", "city", "spawnZone", "base"],
+    ),
+  ],
   oneWay: true,
-  warheadDamage: 110,
-  impactRadius: 18,
   interceptDifficulty: 0.68,
 };
 
@@ -305,10 +333,16 @@ const enemyBallisticMissileTemplate: PlatformTemplate = {
     targetTypesSupported: ["city", "spawnZone", "base"],
     jamResistance: 0.72,
   },
-  weapons: [],
+  weapons: [
+    terminalPayloadTemplate(
+      "Strike Payload",
+      118,
+      10,
+      20,
+      ["fighterJet", "drone", "ballisticMissile", "city", "spawnZone", "base"],
+    ),
+  ],
   oneWay: true,
-  warheadDamage: 118,
-  impactRadius: 20,
   interceptDifficulty: 0.74,
 };
 
@@ -380,8 +414,6 @@ function createPlatform(
       targetTypesSupported: [...template.sensors.targetTypesSupported],
     },
     weapons: createWeapons(id, template.weapons),
-    warheadDamage: template.warheadDamage,
-    impactRadius: template.impactRadius,
     interceptDifficulty: template.interceptDifficulty,
   };
 }
@@ -543,6 +575,8 @@ export function getWeaponClassLabel(weaponClass: WeaponClass): string {
       return "Bomb";
     case "surfaceToAirMissile":
       return "SAM";
+    case "terminalPayload":
+      return "Terminal Payload";
     default:
       return weaponClass;
   }
