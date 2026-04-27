@@ -1,8 +1,18 @@
 import type { ResourceAssignment } from "../engine/allocation";
 import type { CombatLogEvent } from "../engine/combat";
+import type { EnemyDirectorSnapshot } from "../engine/enemy-director";
+import type { ResponsePlannerSnapshot } from "../engine/planning";
+import type { AlliedForcePostureSnapshot } from "../engine/posture";
 
 type InfoPanelApi = {
-  update: (assignments: ResourceAssignment[], events: CombatLogEvent[]) => void;
+  root: HTMLElement;
+  update: (
+    assignments: ResourceAssignment[],
+    events: CombatLogEvent[],
+    alliedPostureSnapshot: AlliedForcePostureSnapshot,
+    responsePlannerSnapshot: ResponsePlannerSnapshot,
+    directorSnapshot: EnemyDirectorSnapshot,
+  ) => void;
 };
 
 type Tone = {
@@ -200,8 +210,14 @@ function createEmptyState(text: string): HTMLDivElement {
 }
 
 function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
-  const missionTone = assignment.mission === "intercept" ? mediumTone : lowTone;
-  const missionLabel = assignment.mission === "intercept" ? "Intercept" : "Reinforce";
+  const missionTone =
+    assignment.mission === "intercept" ? mediumTone : lowTone;
+  const missionLabel =
+    assignment.mission === "intercept"
+      ? "Intercept"
+      : assignment.mission === "recon"
+        ? "Recon"
+        : "Reinforce";
   const threatTone = getThreatTone(assignment.threatScore);
   const priorityTone = getPriorityTone(assignment.priorityScore);
 
@@ -246,7 +262,13 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
   route.appendChild(routeTitle);
 
   const routeMeta = document.createElement("div");
-  routeMeta.textContent = `${assignment.distance.toFixed(0)} px projected path`;
+  const interceptTimeLabel =
+    assignment.interceptTimeSeconds === undefined
+      ? ""
+      : ` | ETA ${assignment.interceptTimeSeconds.toFixed(1)} s`;
+  const weaponLabel = assignment.weaponName ? ` | ${assignment.weaponName}` : "";
+  routeMeta.textContent =
+    `${assignment.distance.toFixed(0)} px projected path${interceptTimeLabel}${weaponLabel}`;
   setStyles(routeMeta, {
     color: "#9fb6be",
     fontSize: "11px",
@@ -254,7 +276,31 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
   route.appendChild(routeMeta);
 
   header.appendChild(route);
-  header.appendChild(createPill(missionLabel, missionTone));
+  const headerPills = document.createElement("div");
+  setStyles(headerPills, {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: "6px",
+  });
+  headerPills.appendChild(createPill(missionLabel, missionTone));
+  if (assignment.weaponClass) {
+    headerPills.appendChild(
+      createPill(
+        assignment.weaponClass === "airToAirMissile"
+          ? "A2A Missile"
+          : assignment.weaponClass === "rapidFire"
+            ? "Rapid Fire"
+            : assignment.weaponClass === "bomb"
+              ? "Bomb"
+              : assignment.weaponClass === "terminalPayload"
+                ? "Terminal Payload"
+              : "Weapon",
+        assignment.mission === "intercept" ? lowTone : mediumTone,
+      ),
+    );
+  }
+  header.appendChild(headerPills);
   item.appendChild(header);
 
   const explanationBlock = document.createElement("div");
@@ -306,6 +352,19 @@ function createAssignmentCard(assignment: ResourceAssignment): HTMLElement {
       priorityTone,
     ),
   );
+  if (assignment.expectedEffectiveness !== undefined) {
+    scoreGrid.appendChild(
+      createMetricCard(
+        "Weapon Match",
+        assignment.expectedEffectiveness.toFixed(2),
+        assignment.expectedEffectiveness >= 0.8
+          ? lowTone
+          : assignment.expectedEffectiveness >= 0.45
+            ? mediumTone
+            : highTone,
+      ),
+    );
+  }
   item.appendChild(scoreGrid);
 
   return item;
@@ -346,6 +405,32 @@ function createEventItem(event: CombatLogEvent): HTMLDivElement {
   eventItem.appendChild(eventText);
 
   return eventItem;
+}
+
+function getAggressionTone(
+  directorSnapshot: EnemyDirectorSnapshot,
+): Tone {
+  switch (directorSnapshot.aggressionTier) {
+    case "surge":
+      return highTone;
+    case "pressure":
+      return mediumTone;
+    case "opening":
+    default:
+      return lowTone;
+  }
+}
+
+function getPostureTone(stance: "standby" | "balanced" | "surging"): Tone {
+  switch (stance) {
+    case "surging":
+      return highTone;
+    case "balanced":
+      return mediumTone;
+    case "standby":
+    default:
+      return lowTone;
+  }
 }
 
 export function createInfoPanel(container: HTMLElement): InfoPanelApi {
@@ -459,6 +544,18 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
   );
   body.appendChild(assignmentsSection.root);
 
+  const plannerSection = createSection(
+    "Response Planner",
+    "Portfolio-level rationale, confidence, and fallback state.",
+  );
+  body.appendChild(plannerSection.root);
+
+  const postureSection = createSection(
+    "Force Posture",
+    "Why each side is surging, holding, or standing down.",
+  );
+  body.appendChild(postureSection.root);
+
   const eventSection = createSection(
     "Combat Event Log",
     "Recent engagements and losses from the simulation.",
@@ -535,6 +632,7 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     panel.style.top = `${panelRect.top - containerRect.top}px`;
     panel.style.right = "auto";
     panel.style.bottom = "auto";
+    panel.dataset.modalDetached = "true";
 
     dragOffsetX = event.clientX - panelRect.left;
     dragOffsetY = event.clientY - panelRect.top;
@@ -581,8 +679,16 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
 
   window.addEventListener("resize", clampPanelToContainer);
 
-  const render = (assignments: ResourceAssignment[], events: CombatLogEvent[]): void => {
+  const render = (
+    assignments: ResourceAssignment[],
+    events: CombatLogEvent[],
+    alliedPostureSnapshot: AlliedForcePostureSnapshot,
+    responsePlannerSnapshot: ResponsePlannerSnapshot,
+    directorSnapshot: EnemyDirectorSnapshot,
+  ): void => {
     assignmentsSection.content.innerHTML = "";
+    plannerSection.content.innerHTML = "";
+    postureSection.content.innerHTML = "";
     eventSection.content.innerHTML = "";
 
     const assignmentTone =
@@ -604,6 +710,282 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
       }
     }
 
+    const plannerTone =
+      responsePlannerSnapshot.mode === "portfolio-beam"
+        ? responsePlannerSnapshot.objectiveScore >= 18
+          ? highTone
+          : mediumTone
+        : lowTone;
+    const plannerSummary = createEmptyState(
+      `${responsePlannerSnapshot.mode === "portfolio-beam" ? "Portfolio planner active." : "Heuristic fallback active."} ` +
+        `${responsePlannerSnapshot.primaryRationale}`,
+    );
+    setStyles(plannerSummary, {
+      border: `1px solid ${plannerTone.border}`,
+      background: plannerTone.background,
+      color: "#dfe9ec",
+    });
+    plannerSection.content.appendChild(plannerSummary);
+
+    const plannerMetrics = document.createElement("div");
+    setStyles(plannerMetrics, {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "8px",
+    });
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Plan Mode",
+        responsePlannerSnapshot.mode === "portfolio-beam" ? "Portfolio Beam" : "Fallback",
+        plannerTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Objective",
+        responsePlannerSnapshot.objectiveScore.toFixed(1),
+        plannerTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Actions Considered",
+        `${responsePlannerSnapshot.consideredActionCount}`,
+        mediumTone,
+      ),
+    );
+    plannerMetrics.appendChild(
+      createMetricCard(
+        "Actions Selected",
+        `${responsePlannerSnapshot.selectedActionCount}`,
+        lowTone,
+      ),
+    );
+    plannerSection.content.appendChild(plannerMetrics);
+
+    if (responsePlannerSnapshot.beliefSummaries.length > 0) {
+      const beliefList = document.createElement("div");
+      setStyles(beliefList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const belief of responsePlannerSnapshot.beliefSummaries) {
+        const tone =
+          belief.confidence >= 0.78
+            ? highTone
+            : belief.confidence >= 0.55
+              ? mediumTone
+              : lowTone;
+        const item = document.createElement("div");
+        item.textContent =
+          `Enemy ${belief.enemyId.slice(0, 6)} -> ${belief.targetName} ` +
+          `(${(belief.confidence * 100).toFixed(0)}% confidence)`;
+        setStyles(item, {
+          padding: "8px",
+          border: `1px solid ${tone.border}`,
+          borderRadius: "7px",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: tone.color,
+          fontSize: "12px",
+          fontWeight: "700",
+          lineHeight: "1.35",
+        });
+        beliefList.appendChild(item);
+      }
+
+      plannerSection.content.appendChild(beliefList);
+    }
+
+    if (responsePlannerSnapshot.alternativeSummary) {
+      plannerSection.content.appendChild(
+        createEmptyState(responsePlannerSnapshot.alternativeSummary),
+      );
+    }
+
+    const aggressionTone = getAggressionTone(directorSnapshot);
+    const alliedPostureTone = getPostureTone(alliedPostureSnapshot.stance);
+    const enemyPostureTone = getPostureTone(directorSnapshot.postureSnapshot.stance);
+    const postureMetrics = document.createElement("div");
+    setStyles(postureMetrics, {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "8px",
+    });
+    postureMetrics.appendChild(
+      createMetricCard("Aggression Tier", directorSnapshot.aggressionLabel, aggressionTone),
+    );
+    postureMetrics.appendChild(
+      createMetricCard(
+        "Allied Posture",
+        alliedPostureSnapshot.stance === "surging"
+          ? "Defensive Surge"
+          : alliedPostureSnapshot.stance === "standby"
+            ? "Standby Recall"
+            : "Balanced Cover",
+        alliedPostureTone,
+      ),
+    );
+    postureMetrics.appendChild(
+      createMetricCard(
+        "Allied Burden",
+        `${alliedPostureSnapshot.activeBurdenScore.toFixed(1)} / ${alliedPostureSnapshot.demandScore.toFixed(1)}`,
+        alliedPostureTone,
+      ),
+    );
+    postureMetrics.appendChild(
+      createMetricCard(
+        "Enemy Burden",
+        `${directorSnapshot.postureSnapshot.activeBurdenScore.toFixed(1)} / ${directorSnapshot.postureSnapshot.demandScore.toFixed(1)}`,
+        enemyPostureTone,
+      ),
+    );
+    postureSection.content.appendChild(postureMetrics);
+
+    const postureNarrative = document.createElement("div");
+    setStyles(postureNarrative, {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "8px",
+    });
+    const alliedNarrative = createEmptyState(
+      `Allied: ${alliedPostureSnapshot.summary} ` +
+        `Incursions ${alliedPostureSnapshot.incursionCount}, recommended airborne ${alliedPostureSnapshot.recommendedActiveCount}, ` +
+        `recall ${alliedPostureSnapshot.recallPressureActive ? "armed" : "holding"} ` +
+        `(${alliedPostureSnapshot.sustainedSurplusSeconds.toFixed(1)} s).`,
+    );
+    const enemyNarrative = createEmptyState(
+      `Enemy: ${directorSnapshot.postureSnapshot.summary} ` +
+        `Opportunities ${directorSnapshot.postureSnapshot.opportunityCount}, cap ${directorSnapshot.activeEnemyCount}/${directorSnapshot.activeEnemyCap}, ` +
+        `launch release ${directorSnapshot.postureSnapshot.launchReleaseActive ? "open" : "held"} ` +
+        `(${directorSnapshot.postureSnapshot.sustainedDemandSeconds.toFixed(1)} s).`,
+    );
+    postureNarrative.appendChild(alliedNarrative);
+    postureNarrative.appendChild(enemyNarrative);
+    postureSection.content.appendChild(postureNarrative);
+
+    if (directorSnapshot.cityExposureScores.length > 0) {
+      const exposureList = document.createElement("div");
+      setStyles(exposureList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const cityExposure of directorSnapshot.cityExposureScores) {
+        const tone =
+          cityExposure.exposure >= 7
+            ? highTone
+            : cityExposure.exposure >= 5
+              ? mediumTone
+              : lowTone;
+        const row = document.createElement("div");
+        setStyles(row, {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          padding: "8px",
+          border: `1px solid ${tone.border}`,
+          borderRadius: "7px",
+          background: "rgba(16, 36, 42, 0.48)",
+        });
+
+        const label = document.createElement("div");
+        label.textContent = cityExposure.cityName;
+        setStyles(label, {
+          color: "#e5eef2",
+          fontSize: "12px",
+          fontWeight: "700",
+          lineHeight: "1.25",
+        });
+        row.appendChild(label);
+
+        const meta = document.createElement("div");
+        meta.textContent = `Exposure ${cityExposure.exposure.toFixed(2)}`;
+        setStyles(meta, {
+          color: tone.color,
+          fontSize: "11px",
+          fontWeight: "800",
+          lineHeight: "1",
+          whiteSpace: "nowrap",
+        });
+        row.appendChild(meta);
+        exposureList.appendChild(row);
+      }
+
+      postureSection.content.appendChild(exposureList);
+    }
+
+    const alliedCoverageNeeds = alliedPostureSnapshot.cityStates.filter(
+      (cityState) => cityState.unmetCoverage > 0.35 || cityState.activeThreatCount > 0,
+    );
+    if (alliedCoverageNeeds.length > 0) {
+      const demandList = document.createElement("div");
+      setStyles(demandList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const cityState of alliedCoverageNeeds.slice(0, 3)) {
+        const tone =
+          cityState.unmetCoverage >= 2.2
+            ? highTone
+            : cityState.unmetCoverage >= 1
+              ? mediumTone
+              : lowTone;
+        const item = document.createElement("div");
+        item.textContent =
+          `${cityState.cityName}: unmet cover ${cityState.unmetCoverage.toFixed(1)} ` +
+          `| threats ${cityState.activeThreatCount}`;
+        setStyles(item, {
+          padding: "8px",
+          border: `1px solid ${tone.border}`,
+          borderRadius: "7px",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: tone.color,
+          fontSize: "12px",
+          fontWeight: "700",
+          lineHeight: "1.35",
+        });
+        demandList.appendChild(item);
+      }
+
+      postureSection.content.appendChild(demandList);
+    }
+
+    if (directorSnapshot.recentLaunches.length === 0) {
+      postureSection.content.appendChild(
+        createEmptyState("Enemy bases are still holding inventory and probing for openings."),
+      );
+    } else {
+      const launchList = document.createElement("div");
+      setStyles(launchList, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      });
+
+      for (const launch of directorSnapshot.recentLaunches.slice(0, 4)) {
+        const item = document.createElement("div");
+        item.textContent = launch;
+        setStyles(item, {
+          padding: "8px",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+          borderRadius: "7px",
+          background: "rgba(255, 255, 255, 0.04)",
+          color: "#c7d5da",
+          fontSize: "12px",
+          lineHeight: "1.35",
+        });
+        launchList.appendChild(item);
+      }
+
+      postureSection.content.appendChild(launchList);
+    }
+
     if (events.length === 0) {
       eventSection.content.appendChild(createEmptyState("No combat events yet."));
     } else {
@@ -613,9 +995,62 @@ export function createInfoPanel(container: HTMLElement): InfoPanelApi {
     }
   };
 
-  render([], []);
+  render(
+    [],
+    [],
+    {
+      stance: "balanced",
+      summary: "Coverage and reserve posture are broadly balanced.",
+      demandScore: 0,
+      activeBurdenScore: 0,
+      usefulAirborneScore: 0,
+      reserveScore: 0,
+      surplusScore: 0,
+      sustainedSurplusSeconds: 0,
+      sustainedDemandSeconds: 0,
+      recallPressureActive: false,
+      launchReleaseActive: false,
+      recommendedActiveCount: 1,
+      incursionCount: 0,
+      cityStates: [],
+    },
+    {
+      mode: "heuristic-fallback",
+      objectiveScore: 0,
+      consideredActionCount: 0,
+      selectedActionCount: 0,
+      primaryRationale: "No response plan has been generated yet.",
+      beliefSummaries: [],
+    },
+    {
+      aggressionTier: "opening",
+      aggressionLabel: "Opening Probe",
+      aggressionPercent: 26,
+      activeEnemyCount: 0,
+      activeEnemyCap: 0,
+      postureSnapshot: {
+        stance: "balanced",
+        summary: "Launch appetite and active pressure are broadly matched.",
+        demandScore: 0,
+        activeBurdenScore: 0,
+        usefulAirborneScore: 0,
+        reserveScore: 0,
+        surplusScore: 0,
+        sustainedSurplusSeconds: 0,
+        sustainedDemandSeconds: 0,
+        recallPressureActive: false,
+        launchReleaseActive: false,
+        recommendedActiveCount: 1,
+        opportunityCount: 0,
+        cityStates: [],
+      },
+      cityExposureScores: [],
+      recentLaunches: [],
+    },
+  );
 
   return {
+    root: panel,
     update: render,
   };
 }
